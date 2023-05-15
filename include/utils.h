@@ -19,8 +19,6 @@ void *memManager(VM *vm, void *ptr, uint32_t oldSize, uint32_t newSize);
 
 #define DEALLOCATE(vmPtr, memPtr) memManager(vmPtr, memPtr, 0, 0);
 
-#define DEALLOCATE_ARRAY
-
 uint32_t ceilToPowerOf2(uint32_t v);
 
 typedef struct
@@ -101,8 +99,6 @@ DECLARE_BUFFER_TYPE(Int)
 DECLARE_BUFFER_TYPE(Char)
 DECLARE_BUFFER_TYPE(Byte)
 
-void errorReport(void *parser, ErrorType errorType, const char *fmt, ...);
-
 void symbolTableClear(VM *, SymbolTable *buffer);
 
 #define IO_ERROR(...) \
@@ -128,6 +124,8 @@ typedef enum
     ERROR_COMPILE,
     ERROR_RUNTIME
 } ErrorType;
+
+void errorReport(void *parser, ErrorType errorType, const char *fmt, ...);
 
 #define DEFAULT_BUFFER_SIZE 512
 
