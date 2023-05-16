@@ -274,6 +274,10 @@ static void parseString(Parser *parser)
       ByteBufferAdd(parser->vm, &str, parser->curChar);
     }
   }
+
+  // 用识别到的字符串新建字符串对象存储到curToken的value中
+  ObjString *objString = newObjString(parser->vm, (const char *)str.datas, str.count);
+  parser->curToken.value = OBJ_TO_VALUE(objString);
   ByteBufferClear(parser->vm, &str);
 }
 
@@ -336,6 +340,7 @@ void getNextToken(Parser *parser)
   parser->curToken.type = TOKEN_EOF;
   parser->curToken.length = 0;
   parser->curToken.start = parser->nextCharPtr - 1;
+  parser->curToken.value = VT_TO_VALUE(VT_UNDEFINED);
   while (parser->curChar != '\0')
   {
     switch (parser->curChar)
@@ -525,7 +530,8 @@ void consumeNextToken(Parser *parser, TokenType expected, const char *errMsg)
 
 // 由于sourceCode未必来自于文件file,有可能只是个字符串,
 // file仅用作跟踪待编译的代码的标识,方便报错
-void initParser(VM *vm, Parser *parser, const char *file, const char *sourceCode)
+void initParser(VM *vm, Parser *parser, const char *file,
+                const char *sourceCode, ObjModule *objModule)
 {
   parser->file = file;
   parser->sourceCode = sourceCode;
@@ -538,4 +544,5 @@ void initParser(VM *vm, Parser *parser, const char *file, const char *sourceCode
   parser->preToken = parser->curToken;
   parser->interpolationExpectRightParenNum = 0;
   parser->vm = vm;
+  parser->curModule = objModule;
 }
