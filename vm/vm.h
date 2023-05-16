@@ -10,6 +10,7 @@ struct vm
     Class *fnClass;
     Class *listClass;
     Class *rangeClass;
+    Class *mapClass;
     uint32_t allocatedBytes; // 累计已分配的内存量
     ObjHeader *allObjects;
     Parser *curParser; // 当前此法分析器

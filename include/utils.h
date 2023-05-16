@@ -15,7 +15,7 @@ void *memManager(VM *vm, void *ptr, uint32_t oldSize, uint32_t newSize);
     (type *)memManager(vmPtr, NULL, 0, sizeof(type) * count)
 
 #define DEALLOCATE_ARRAY(vmPtr, arrayPtr, count) \
-    (type *)memManager(vmPtr, arrayPtr, sizeof(arrayPtr[0]) * count, 0)
+    memManager(vmPtr, arrayPtr, sizeof(arrayPtr[0]) * count, 0)
 
 #define DEALLOCATE(vmPtr, memPtr) memManager(vmPtr, memPtr, 0, 0);
 
