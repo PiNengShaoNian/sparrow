@@ -2,6 +2,7 @@
 #define _PARSER_PARSER_H
 
 #include "common.h"
+#include "class.h"
 
 typedef enum
 {
@@ -88,6 +89,7 @@ typedef struct
     const char *start;
     uint32_t length;
     uint32_t lineNo;
+    Value value;
 } Token;
 
 struct parser
@@ -98,10 +100,12 @@ struct parser
     char curChar;
     Token preToken;
     Token curToken;
+    ObjModule *curModule; // 当前正在编译的模块
 
     // 处于内嵌表达式之中时,期望的右括号数量.
     // 用于跟踪小括号对儿的嵌套
     int interpolationExpectRightParenNum;
+    struct parser *parent; // 指向父parser
     VM *vm;
 };
 
