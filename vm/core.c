@@ -166,9 +166,57 @@ char *readFile(const char *path)
   return fileContent;
 }
 
+// 从modules中获取名为moduleName的模块
+static ObjModule *getModule(VM *vm, Value moduleName)
+{
+  Value value = mapGet(vm->allModules, moduleName);
+  if (value.type == VT_UNDEFINED)
+    return NULL;
+
+  return VALUE_TO_OBJMODULE(value);
+}
+
+// 载入模块moduleName并编译
+static ObjThread *loadModule(VM *vm, Value moduleName, const char *moduleCode)
+{
+  // 确保模块已经载入到 vm->allModules
+  // 先查看是否已经导入了该模块,避免重新导入
+  ObjModule *module = getModule(vm, moduleName);
+
+  // 若该模块未加载先将其载入,并继承核心模块中的变量
+  if (module == NULL)
+  {
+    // 创建模块并添加到vm->allModules
+    ObjString *modName = VALUE_TO_OBJSTR(moduleName);
+    ASSERT(modName->value.start[modName->value.length] == '\0', "string.value.start is not terminated!");
+
+    module = newObjModule(vm, modName->value.start);
+    mapSet(vm, vm->allModules, moduleName, OBJ_TO_VALUE(module));
+
+    // 继承核心模块中的变量
+    ObjModule *coreModule = getModule(vm, CORE_MODULE);
+    uint32_t idx = 0;
+    while (idx < coreModule->moduleVarName.count)
+    {
+      defineModuleVar(vm, module,
+                      coreModule->moduleVarName.datas[idx].str,
+                      strlen(coreModule->moduleVarName.datas[idx].str),
+                      coreModule->moduleVarValue.datas[idx]);
+      idx++;
+    }
+  }
+
+  ObjFn *fn = compileModule(vm, module, moduleCode);
+  ObjClosure *objClosure = newObjClosure(vm, fn);
+  ObjThread *moduleThread = newObjThread(vm, objClosure);
+
+  return moduleThread;
+}
+
 // 执行模块,目前为空,桩函数
 VMResult executeModule(UNUSED VM *vm, UNUSED Value moduleName, UNUSED const char *moduleCode)
 {
+  UNUSED ObjThread *objThread = loadModule(vm, moduleName, moduleCode);
   return VM_RESULT_ERROR;
 }
 

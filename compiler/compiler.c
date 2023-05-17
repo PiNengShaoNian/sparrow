@@ -79,3 +79,9 @@ int defineModuleVar(VM *vm, ObjModule *objModule, const char *name,
 
   return symbolIndex;
 }
+
+// 编译模块(目前是桩函数)
+ObjFn *compileModule(UNUSED VM *vm, UNUSED ObjModule *objModule, UNUSED const char *moduleCode)
+{
+  return NULL;
+}
