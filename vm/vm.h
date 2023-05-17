@@ -21,6 +21,11 @@ struct vm
     Class *rangeClass;
     Class *mapClass;
     Class *threadClass;
+    Class *nullClass;
+    Class *boolClass;
+    Class *numClass;
+    Class *objectClass;
+    Class *classOfClass;
     uint32_t allocatedBytes; // 累计已分配的内存量
     ObjHeader *allObjects;
     SymbolTable allMethodNames; //(所有)类的方法名

@@ -47,3 +47,38 @@ bool valueIsEqual(Value a, Value b)
 
   return false; // 其它对象不可比较
 }
+
+// 新建一个裸类
+Class *newRawClass(VM *vm, const char *name, uint32_t fieldNum)
+{
+  Class *class = ALLOCATE(vm, Class);
+
+  // 裸类没有元类
+  initObjHeader(vm, &class->objHeader, OT_CLASS, NULL);
+  class->name = newObjString(vm, name, strlen(name));
+  class->fieldNum = fieldNum;
+  class->superClass = NULL; // 默认没有基类
+  MethodBufferInit(&class->methods);
+
+  return class;
+}
+
+// 数字等Value也被视为对象,因此参数为Value.获得对象obj所属的类
+inline Class *getClassOfObj(VM *vm, Value object)
+{
+  switch (object.type)
+  {
+  case VT_NULL:
+    return vm->nullClass;
+  case VT_FALSE:
+  case VT_TRUE:
+    return vm->boolClass;
+  case VT_NUM:
+    return vm->numClass;
+  case VT_OBJ:
+    return VALUE_TO_OBJ(object)->class;
+  default:
+    NOT_REACHED();
+  }
+  return NULL;
+}
