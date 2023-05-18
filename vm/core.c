@@ -220,6 +220,16 @@ VMResult executeModule(UNUSED VM *vm, UNUSED Value moduleName, UNUSED const char
   return VM_RESULT_ERROR;
 }
 
+// 确保符号已经加到符号表
+int ensureSymbolExist(VM *vm, SymbolTable *table, const char *symbol, uint32_t length)
+{
+  int symbolIndex = getIndexFromSymbolTable(table, symbol, length);
+  if (symbolIndex == -1)
+    return addSymbol(vm, table, symbol, length);
+
+  return symbolIndex;
+}
+
 // 定义类
 static Class *defineClass(VM *vm, ObjModule *objModule, const char *name)
 {

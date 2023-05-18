@@ -94,6 +94,8 @@ typedef struct
   methodSignatureFn methodSign;
 } SymbolBindRule; // 符号绑定规则
 
+static uint32_t addConstant(CompileUnit *cu, Value constant);
+
 // 初始化CompileUnit
 static void initCompileUint(Parser *parser, CompileUnit *cu,
                             CompileUnit *enclosingUint, bool isMethod)
@@ -235,6 +237,110 @@ int defineModuleVar(VM *vm, ObjModule *objModule, const char *name,
   return symbolIndex;
 }
 
+// 把Signature转换为字符串,返回字符串长度
+static uint32_t sign2String(Signature *sign, char *buf)
+{
+  uint32_t pos = 0;
+
+  // 复制方法名xxx
+  memcpy(buf + pos, sign->name, sign->length);
+  pos += sign->length;
+
+  // 下面单独处理方法名之后的部分
+  switch (sign->type)
+  {
+
+    // SIGN_GETTER形式:xxx,无参数,上面memcpy已完成
+  case SIGN_GETTER:
+    break;
+  // SIGN_SETTER形式: xxx=(_),之前已完成xxx
+  case SIGN_SETTER:
+    buf[pos++] = '=';
+    // 下面添加=右边的赋值,只支持一个赋值
+    buf[pos++] = '(';
+    buf[pos++] = '_';
+    buf[pos++] = ')';
+    break;
+
+  // SIGN_METHOD和SIGN_CONSTRUCT形式:xxx(_,...)
+  case SIGN_CONSTRUCT:
+  case SIGN_METHOD:
+  {
+    buf[pos++] = '(';
+    uint32_t idx = 0;
+    while (idx < sign->argNum)
+    {
+      buf[pos++] = '_';
+      buf[pos++] = ',';
+      idx++;
+    }
+
+    if (idx == 0) // 说明没有参数
+    {
+      buf[pos++] = ')';
+    }
+    else // 用rightBracket覆盖最后的','
+    {
+      buf[pos - 1] = ')';
+    }
+    break;
+  }
+    // SIGN_SUBSCRIPT形式:xxx[_,...]
+  case SIGN_SUBSCRIPT:
+  {
+    buf[pos++] = '[';
+    uint32_t idx = 0;
+    while (idx < sign->argNum)
+    {
+      buf[pos++] = '_';
+      buf[pos++] = ',';
+      idx++;
+    }
+    if (idx == 0) // 说明没有参数
+    {
+      buf[pos++] = ']';
+    }
+    else // 用rightBracket覆盖最后的','
+    {
+      buf[pos - 1] = ']';
+    }
+    break;
+  }
+    // SIGN_SUBSCRIPT_SETTER形式:xxx[_,...]=(_)
+  case SIGN_SUBSCRIPT_SETTER:
+  {
+    buf[pos++] = '[';
+    uint32_t idx = 0;
+    // argNum包括了等号右边的1个赋值参数,
+    // 这里是在处理等号左边subscript中的参数列表,因此减1.
+    // 后面专门添加该参数
+    while (idx < sign->argNum - 1)
+    {
+      buf[pos++] = '_';
+      buf[pos++] = ',';
+      idx++;
+    }
+    if (idx == 0) // 说明没有参数
+    {
+      buf[pos++] = ']';
+    }
+    else // 用rightBracket覆盖最后的','
+    {
+      buf[pos - 1] = ']';
+    }
+
+    // 下面为等号右边的参数构造签名部分
+    buf[pos++] = '=';
+    buf[pos++] = '(';
+    buf[pos++] = '_';
+    buf[pos++] = ')';
+  }
+  }
+
+  buf[pos] = '\0';
+  return pos; // 返回签名串的长度
+}
+
 // 添加常量并返回其索引
 static uint32_t addConstant(CompileUnit *cu, Value constant)
 {
@@ -299,6 +405,82 @@ SymbolBindRule Rules[] = {
     /* TOKEN_NUM	*/ PREFIX_SYMBOL(literal),
     /* TOKEN_STRING */ PREFIX_SYMBOL(literal),
 };
+
+// 语法分析的核心
+static void expression(CompileUnit *cu, BindPower rbp)
+{
+  // 以中缀运算符表达式"aSwTe"为例,
+  // 大写字符表示运算符,小写字符表示操作数
+
+  // 进入expression时,curToken是操作数w, preToken是运算符S
+  DenotationFn nud = Rules[cu->curParser->curToken.type].nud;
+
+  // 表达式开头的要么是操作数要么是前缀运算符,必然有nud方法
+  ASSERT(nud != NULL, "nud is NULL!");
+
+  getNextToken(cu->curParser); // 执行后curToken为运算符T
+
+  bool canAssign = rbp < BP_ASSIGN;
+  nud(cu, canAssign);
+
+  while (rbp < Rules[cu->curParser->curToken.type].lbp)
+  {
+    DenotationFn led = Rules[cu->curParser->curToken.type].led;
+    getNextToken(cu->curParser); // 执行后curToken为操作数e
+    led(cu, canAssign);          // 计算运算符T.led方法
+  }
+}
+
+// 通过签名编译方法调用 包括callX和superX指令
+static void emitCallBySignature(CompileUnit *cu, Signature *sign, OpCode opCode)
+{
+  char signBuffer[MAX_SIGN_LEN];
+  uint32_t length = sign2String(sign, signBuffer);
+
+  // 确保签名录入到vm->allMethodNames中
+  int symbolIndex = ensureSymbolExist(cu->curParser->vm,
+                                      &cu->curParser->vm->allMethodNames, signBuffer, length);
+  writeOpCodeShortOperand(cu, opCode + sign->argNum, symbolIndex);
+
+  // 此时在常量表中预创建一个空slot占位,将来绑定方法时再装入基类
+  if (opCode == OPCODE_SUPER0)
+    writeShortOperand(cu, addConstant(cu, VT_TO_VALUE(VT_NULL)));
+}
+
+// 生成方法调用的指令,仅限callX指令
+static void emitCall(CompileUnit *cu, int numArgs, const char *name, int length)
+{
+  int symbolIndex = ensureSymbolExist(cu->curParser->vm,
+                                      &cu->curParser->vm->allMethodNames, name, length);
+  writeOpCodeShortOperand(cu, OPCODE_CALL0 + numArgs, symbolIndex);
+}
+
+// 中缀运算符.led方法
+static void infixOperator(CompileUnit *cu, UNUSED bool canAssign)
+{
+  SymbolBindRule *rule = &Rules[cu->curParser->preToken.type];
+
+  // 中缀运算符对左右操作数的绑定权值一样
+  BindPower rbp = rule->lbp;
+  expression(cu, rbp); // 解析右操作数
+
+  // 生成1个参数的签名
+  Signature sign = {SIGN_METHOD, rule->id, strlen(rule->id), 1};
+  emitCallBySignature(cu, &sign, OPCODE_CALL0);
+}
+
+// 前缀运算符.nud方法, 如'-','!'等
+static void unaryOperator(CompileUnit *cu, UNUSED bool canAssign)
+{
+  SymbolBindRule *rule = &Rules[cu->curParser->preToken.type];
+
+  // BP_UNARY做为rbp去调用expression解析右操作数
+  expression(cu, BP_UNARY);
+
+  // 生成调用前缀运算符的指令
+  // 0个参数,前缀运算符都是1个字符,长度是1
+  emitCall(cu, 0, rule->id, 1);
+}
 
 // 编译程序
 static void compileProgram(UNUSED CompileUnit *cu)
