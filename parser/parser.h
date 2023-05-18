@@ -4,6 +4,7 @@
 #include "common.h"
 #include "class.h"
 #include "meta_obj.h"
+#include "compiler.h"
 
 typedef enum
 {
@@ -101,7 +102,8 @@ struct parser
     char curChar;
     Token preToken;
     Token curToken;
-    ObjModule *curModule; // 当前正在编译的模块
+    ObjModule *curModule;        // 当前正在编译的模块
+    CompileUnit *curCompileUnit; // 当前编译单元
 
     // 处于内嵌表达式之中时,期望的右括号数量.
     // 用于跟踪小括号对儿的嵌套
