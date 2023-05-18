@@ -46,6 +46,54 @@ static const int opCodeSlotsUsed[] = {
 };
 #undef OPCODE_SLOTS
 
+typedef enum
+{
+  BP_NONE, // 无绑定能力
+
+  // 从上往下,优先级越来越高
+  BP_LOWEST,    // 最低绑定能力
+  BP_ASSIGN,    // =
+  BP_CONDITION, // ?:
+  BP_LOGIC_OR,  // ||
+  BP_LOGIC_AND, // &&
+  BP_EQUAL,     // == !=
+  BP_IS,        // is
+  BP_CMP,       // < > <= >=
+  BP_BIT_OR,    // |
+  BP_BIT_AND,   // &
+  BP_BIT_SHIFT, // << >>
+  BP_RANGE,     // ..
+  BP_TERM,      // + -
+  BP_FACTOR,    // * / %
+  BP_UNARY,     // - ! ~
+  BP_CALL,      // . () []
+  BP_HIGHEST
+} BindPower; // 定义了操作符的绑定权值,即优先级
+
+// 指示符函数指针
+typedef void (*DenotationFn)(CompileUnit *cu, bool canAssign);
+
+// 签名函数指针
+typedef void (*methodSignatureFn)(CompileUnit *cu, Signature *signature);
+
+typedef struct
+{
+  const char *id; // 符号
+
+  // 左绑定权值,不关注左边操作数的符号此值为0
+  BindPower lbp;
+
+  // 字面量,变量,前缀运算符等不关注左操作数的Token调用的方法
+  DenotationFn nud;
+
+  // 中缀运算符等关注左操作数的Token调用的方法
+  DenotationFn led;
+
+  // 表示本符号在类中被视为一个方法,
+  // 为其生成一个方法签名.
+  methodSignatureFn methodSign;
+} SymbolBindRule; // 符号绑定规则
+
 // 初始化CompileUnit
 static void initCompileUint(Parser *parser, CompileUnit *cu,
                             CompileUnit *enclosingUint, bool isMethod)
@@ -186,6 +234,71 @@ int defineModuleVar(VM *vm, ObjModule *objModule, const char *name,
 
   return symbolIndex;
 }
+
+// 添加常量并返回其索引
+static uint32_t addConstant(CompileUnit *cu, Value constant)
+{
+  ValueBufferAdd(cu->curParser->vm, &cu->fn->constants, constant);
+  return cu->fn->constants.count - 1;
+}
+
+// 生成加载常量的指令
+static void emitLoadConstant(CompileUnit *cu, Value value)
+{
+  int index = addConstant(cu, value);
+  writeOpCodeShortOperand(cu, OPCODE_LOAD_CONSTANT, index);
+}
+
+// 数字和字符串.nud() 编译字面量
+static void literal(CompileUnit *cu, UNUSED bool canAssign)
+{
+  // literal是常量(数字和字符串)的nud方法,用来返回字面值.
+  emitLoadConstant(cu, cu->curParser->preToken.value);
+}
+
+// 不关注左操作数的符号称为前缀符号
+// 用于如字面量,变量名,前缀符号等非运算符
+#define PREFIX_SYMBOL(nud)         \
+  {                                \
+    NULL, BP_NONE, nud, NULL, NULL \
+  }
+
+// 前缀运算符,如'!'
+#define PREFIX_OPERATOR(id)                                \
+  {                                                        \
+    id, BP_NONE, unaryOperator, NULL, unaryMethodSignature \
+  }
+
+// 关注左操作数的符号称为中缀符号
+// 数组'[',函数'(',实例与方法之间的'.'等
+#define INFIX_SYMBOL(lbp, led) \
+  {                            \
+    NULL, lbp, NULL, led, NULL \
+  }
+
+// 中棳运算符
+#define INFIX_OPERATOR(id, lbp)                        \
+  {                                                    \
+    id, lbp, NULL, infixOperator, infixMethodSignature \
+  }
+
+// 既可做前缀又可做中缀的运算符,如'-'
+#define MIX_OPERATOR(id)                                          \
+  {                                                               \
+    id, BP_TERM, unaryOperator, infixOperator, mixMethodSignature \
+  }
+
+// 占位用的
+#define UNUSED_RULE                 \
+  {                                 \
+    NULL, BP_NONE, NULL, NULL, NULL \
+  }
+
+SymbolBindRule Rules[] = {
+    /* TOKEN_INVALID*/ UNUSED_RULE,
+    /* TOKEN_NUM	*/ PREFIX_SYMBOL(literal),
+    /* TOKEN_STRING */ PREFIX_SYMBOL(literal),
+};
 
 // 编译程序
 static void compileProgram(UNUSED CompileUnit *cu)
