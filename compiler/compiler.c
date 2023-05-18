@@ -187,8 +187,49 @@ int defineModuleVar(VM *vm, ObjModule *objModule, const char *name,
   return symbolIndex;
 }
 
-// 编译模块(目前是桩函数)
-ObjFn *compileModule(UNUSED VM *vm, UNUSED ObjModule *objModule, UNUSED const char *moduleCode)
+// 编译程序
+static void compileProgram(UNUSED CompileUnit *cu)
 {
-  return NULL;
+  ;
+}
+
+// 编译模块(目前是桩函数)
+ObjFn *compileModule(UNUSED VM *vm, UNUSED ObjModule *objModule,
+                     UNUSED const char *moduleCode)
+{
+  // 各源码模块文件需要单独的parser
+  Parser parser;
+  parser.parent = vm->curParser;
+  vm->curParser = &parser;
+
+  if (objModule->name == NULL)
+  {
+    // 核心模块是core.script.inc
+    initParser(vm, &parser, "core.script.inc", moduleCode, objModule);
+  }
+  else
+  {
+    initParser(vm, &parser,
+               (const char *)objModule->name->value.start, moduleCode, objModule);
+  }
+
+  CompileUnit moduleCU;
+  initCompileUint(&parser, &moduleCU, NULL, false);
+
+  // 记录现在模块变量的数量,后面检查预定义模块变量时可减少遍历
+  UNUSED uint32_t moduleVarNumBefor = objModule->moduleVarName.count;
+
+  // 初始的parser->curToken.type为TOKEN_UNKNOWN,下面使其指向第一个合法的token
+  getNextToken(&parser);
+
+  // 此时compileProgram为桩函数,并不会读进token,因此是死循环.
+  while (!matchToken(&parser, TOKEN_EOF))
+  {
+    compileProgram(&moduleCU);
+  }
+
+  // 后面还有很多要做的,临时放一句话在这提醒.
+  // 不过目前上面是死循环,本句无法执行。
+  printf("There is something to do...\n");
+  exit(0);
 }
