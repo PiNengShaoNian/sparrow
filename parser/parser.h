@@ -112,6 +112,8 @@ struct parser
     VM *vm;
 };
 
+#define PEEK_TOKEN(parserPtr) parserPtr->curToken.type
+
 char lookAheadChar(Parser *parser);
 void getNextToken(Parser *parser);
 bool matchToken(Parser *parser, TokenType expected);
