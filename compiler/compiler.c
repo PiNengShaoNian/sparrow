@@ -183,7 +183,7 @@ inline static void writeShortOperand(CompileUnit *cu, int operand)
 }
 
 // 写入操作数为1字节大小的指令
-static int writeOpCodeByteOperand(CompileUnit *cu, OpCode opCode, int operand)
+static UNUSED int writeOpCodeByteOperand(CompileUnit *cu, OpCode opCode, int operand)
 {
   writeOpCode(cu, opCode);
   return writeByteOperand(cu, operand);
@@ -341,6 +341,104 @@ static uint32_t sign2String(Signature *sign, char *buf)
   return pos; // 返回签名串的长度
 }
 
+// 添加局部变量到cu
+static uint32_t addLocalVar(CompileUnit *cu, const char *name, uint32_t length)
+{
+  LocalVar *var = &(cu->localVars[cu->localVarNum]);
+  var->name = name;
+  var->length = length;
+  var->scopeDepth = cu->scopeDepth;
+  var->isUpvalue = false;
+  return cu->localVarNum++;
+}
+
+// 声明局部变量
+static int declareLocalVar(CompileUnit *cu, const char *name, uint32_t length)
+{
+  if (cu->localVarNum >= MAX_LOCAL_VAR_NUM)
+    COMPILE_ERROR(cu->curParser, "the max length of local variable of one scope is %d", MAX_LOCAL_VAR_NUM);
+
+  // 判断当前作用域中该变量是否已存在
+  int idx = (int)cu->localVarNum - 1;
+  while (idx >= 0)
+  {
+    LocalVar *var = &cu->localVars[idx];
+
+    // 只在当前作用域中查找同名变量,
+    // 如果到了父作用域就退出,减少没必要的遍历
+    if (var->scopeDepth < cu->scopeDepth)
+      break;
+
+    if (var->length == length && memcmp(var->name, name, length) == 0)
+    {
+      char id[MAX_ID_LEN] = {'\0'};
+      memcpy(id, name, length);
+      COMPILE_ERROR(cu->curParser, "identifier \"%s\" redefinition!", id);
+    }
+    idx--;
+  }
+  // 检查过后声明该局部变量
+  return addLocalVar(cu, name, length);
+}
+
+// 根据作用域声明变量
+static int declareVariable(CompileUnit *cu, const char *name, uint32_t length)
+{
+  // 若当前是模块作用域就声明为模块变量
+  if (cu->scopeDepth == -1)
+  {
+    int index = defineModuleVar(cu->curParser->vm,
+                                cu->curParser->curModule, name, length, VT_TO_VALUE(VT_NULL));
+    if (index == -1) // 重复定义则报错
+    {
+      char id[MAX_ID_LEN] = {'\0'};
+      memcpy(id, name, length);
+      COMPILE_ERROR(cu->curParser, "identifier \"%s\" redefinition!", id);
+    }
+    return index;
+  }
+
+  // 否则是局部作用域,声明局部变量
+  return declareLocalVar(cu, name, length);
+}
+
+// 为单运算符方法创建签名
+static UNUSED void unaryMethodSignature(UNUSED CompileUnit *cu, UNUSED Signature *sign)
+{
+  // 名称部分在调用前已经完成,只修改类型
+  sign->type = SIGN_GETTER;
+}
+
+// 为中缀运算符创建签名
+static UNUSED void infixMethodSignature(CompileUnit *cu, Signature *sign)
+{
+  // 在类中的运算符都是方法,类型为SIGN_METHOD
+  sign->type = SIGN_METHOD;
+
+  // 中缀运算符只有一个参数,故初始为1
+  sign->argNum = 1;
+  consumeCurToken(cu->curParser, TOKEN_LEFT_PAREN, "expect '(' after infix operator!");
+  consumeCurToken(cu->curParser, TOKEN_ID, "expect variable name!");
+  declareVariable(cu, cu->curParser->preToken.start, cu->curParser->preToken.length);
+  consumeCurToken(cu->curParser, TOKEN_RIGHT_PAREN, "expect ')' after parameter!");
+}
+
+// 为既做单运算符又做中缀运算符的符号方法创建签名
+static UNUSED void mixMethodSignature(CompileUnit *cu, Signature *sign)
+{
+  // 假设是单运算符方法,因此默认为getter
+
+  // 若后面有'(',说明其为中缀运算符,那就置其类型为SIGN_METHOD
+  if (matchToken(cu->curParser, TOKEN_LEFT_PAREN))
+  {
+    sign->type = SIGN_METHOD;
+    sign->argNum = 1;
+    consumeCurToken(cu->curParser, TOKEN_ID, "expect variable name!");
+    declareVariable(cu, cu->curParser->preToken.start, cu->curParser->preToken.length);
+    consumeCurToken(cu->curParser, TOKEN_RIGHT_PAREN, "expect ')' after parameter!");
+  }
+}
+
 // 添加常量并返回其索引
 static uint32_t addConstant(CompileUnit *cu, Value constant)
 {
@@ -456,7 +554,7 @@ static void emitCall(CompileUnit *cu, int numArgs, const char *name, int length)
 }
 
 // 中缀运算符.led方法
-static void infixOperator(CompileUnit *cu, UNUSED bool canAssign)
+static UNUSED void infixOperator(CompileUnit *cu, UNUSED bool canAssign)
 {
   SymbolBindRule *rule = &Rules[cu->curParser->preToken.type];
 
@@ -470,7 +568,7 @@ static void infixOperator(CompileUnit *cu, UNUSED bool canAssign)
 }
 
 // 前缀运算符.nud方法, 如'-','!'等
-static void unaryOperator(CompileUnit *cu, UNUSED bool canAssign)
+static UNUSED void unaryOperator(CompileUnit *cu, UNUSED bool canAssign)
 {
   SymbolBindRule *rule = &Rules[cu->curParser->preToken.type];
 
