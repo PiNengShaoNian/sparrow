@@ -958,6 +958,56 @@ static void emitCall(CompileUnit *cu, int numArgs, const char *name, int length)
   writeOpCodeShortOperand(cu, OPCODE_CALL0 + numArgs, symbolIndex);
 }
 
+// 生成加载类的指令
+static void emitLoadModuleVar(CompileUnit *cu, const char *name)
+{
+  int index = getIndexFromSymbolTable(
+      &cu->curParser->curModule->moduleVarName, name, strlen(name));
+  ASSERT(index != -1, "symbol should have been defined");
+  writeOpCodeShortOperand(cu, OPCODE_LOAD_MODULE_VAR, index);
+}
+
+// 内嵌表达式.nud()
+static void stringInterpolation(CompileUnit *cu, UNUSED bool canAssign)
+{
+  // "a %(b+c) d %(e) f "
+  // 会按照以下形式编译
+  // ["a ", b+c, " d ", e, "f "].join()
+  // 其中"a "和" d "是TOKEN_INTERPOLATION, b,c,e都是TOKEN_ID,"f "是TOKEN_STRING
+
+  // 创造一个list实例,拆分字符串,将拆分出的各部分做为元素添加到list
+  emitLoadModuleVar(cu, "List");
+  emitCall(cu, 0, "new()", 5);
+
+  // 每次处理字符串中的一个内嵌表达式,包括两部分,以"a %(b+c)"为例:
+  //   1 加载TOKEN_INTERPOLATION对应的字符串,如"a ",将其添加到list
+  //   2 解析内嵌表达式,如"b+c",将其结果添加到list
+  do
+  {
+    // 1 处理TOKEN_INTERPOLATION中的字符串,如"a %(b+c)"中的"a "
+    literal(cu, false);
+    // 将字符串添加到list
+    emitCall(cu, 1, "addCore_(_)", 11); // 以_结尾的方法名是内部使用
+
+    // 2 解析内嵌表达式,如"a %(b+c)"中的b+c
+    expression(cu, BP_LOWEST);
+    // 将结果添加到list
+    emitCall(cu, 1, "addCore_(_)", 11);
+  } while (matchToken(cu->curParser, TOKEN_INTERPOLATION)); // 处理下一个内嵌表达式,如"a %(b+c) d %(e) f "中的" d %(e)"
+
+  // 读取最后的字符串,"a %(b+c) d %(e) f "中的"f "
+  consumeCurToken(cu->curParser, TOKEN_STRING, "expect string at the end of interpolatation!");
+
+  // 加载最后的字符串
+  literal(cu, false);
+
+  // 将字符串添加到list
+  emitCall(cu, 1, "addCore_(_)", 11);
+
+  // 最后将以上list中的元素join为一个字符串
+  emitCall(cu, 0, "join()", 6);
+}
+
 // 小写字符开头便是局部变量
 static bool isLocalName(const char *name)
 {
@@ -1171,6 +1221,7 @@ SymbolBindRule Rules[] = {
     /* TOKEN_NUM	*/ PREFIX_SYMBOL(literal),
     /* TOKEN_STRING */ PREFIX_SYMBOL(literal),
     /* TOKEN_ID */ {NULL, BP_NONE, id, NULL, idMethodSignature},
+    /* TOKEN_INTERPOLATION */ PREFIX_SYMBOL(stringInterpolation),
 };
 
 // 语法分析的核心
