@@ -1001,6 +1001,77 @@ static void emitLoadModuleVar(CompileUnit *cu, const char *name)
   writeOpCodeShortOperand(cu, OPCODE_LOAD_MODULE_VAR, index);
 }
 
+// 编译圆括号
+static void parentheses(CompileUnit *cu, UNUSED bool canAssign)
+{
+  // 本函数是'('.nud()  假设curToken是'('
+  expression(cu, BP_LOWEST);
+  consumeCurToken(cu->curParser, TOKEN_RIGHT_PAREN,
+                  "expect ')' after expression!");
+}
+
+//'['.nud() 处理用字面量形式定义的list列表
+static void listLiteral(CompileUnit *cu, UNUSED bool canAssign)
+{
+  // 进入本函数后,curToken是'['右面的符号
+
+  // 先创建list对象
+  emitLoadModuleVar(cu, "List");
+  emitCall(cu, 0, "new()", 5);
+
+  do
+  {
+    // 支持字面量形式定义的空列表
+    if (PEEK_TOKEN(cu->curParser) == TOKEN_RIGHT_BRACKET)
+      break;
+    expression(cu, BP_LOWEST);
+    emitCall(cu, 1, "addCore_(_)", 11);
+  } while (matchToken(cu->curParser, TOKEN_COMMA));
+
+  consumeCurToken(cu->curParser, TOKEN_RIGHT_BRACKET, "expect ']' after list element!");
+}
+
+//'['.led()  用于索引list元素,如list[x]
+static void subscript(CompileUnit *cu, bool canAssign)
+{
+  // 确保[]之间不空
+  if (matchToken(cu->curParser, TOKEN_RIGHT_BRACKET))
+    COMPILE_ERROR(cu->curParser, "need argument in the '[]'!");
+
+  // 默认是[_],即subscript getter
+  Signature sign = {SIGN_SUBSCRIPT, "", 0, 0};
+
+  // 读取参数并把参数加载到栈,统计参数个数
+  processArgList(cu, &sign);
+  consumeCurToken(cu->curParser,
+                  TOKEN_RIGHT_BRACKET, "expect ']' after argument list!");
+
+  // 若是[_]=(_),即subscript setter
+  if (canAssign && matchToken(cu->curParser, TOKEN_ASSIGN))
+  {
+    sign.type = SIGN_SUBSCRIPT_SETTER;
+
+    //=右边的值也算一个参数,签名是[args[1]]=(args[2])
+    if (++sign.argNum > MAX_ARG_NUM)
+      COMPILE_ERROR(cu->curParser, "the max number of argument is %d!", MAX_ARG_NUM);
+
+    // 获取=右边的表达式
+    expression(cu, BP_LOWEST);
+  }
+  emitCallBySignature(cu, &sign, OPCODE_CALL0);
+}
+
+// 为下标操作符'['编译签名
+static void subscriptMethodSignature(CompileUnit *cu, Signature *sign)
+{
+  sign->type = SIGN_SUBSCRIPT;
+  sign->length = 0;
+  processParaList(cu, sign);
+  consumeCurToken(cu->curParser,
+                  TOKEN_RIGHT_BRACKET, "expect ']' after index list!");
+  trySetter(cu, sign); // 判断']'后面是否接'='为setter
+}
+
 // 内嵌表达式.nud()
 static void stringInterpolation(CompileUnit *cu, UNUSED bool canAssign)
 {
@@ -1288,6 +1359,13 @@ SymbolBindRule Rules[] = {
     /* TOKEN_STATIC */ UNUSED_RULE,
     /* TOKEN_IS */ INFIX_OPERATOR("is", BP_IS),
     /* TOKEN_SUPER */ PREFIX_SYMBOL(super),
+    /* TOKEN_IMPORT */ UNUSED_RULE,
+    /* TOKEN_COMMA */ UNUSED_RULE,
+    /* TOKEN_COMMA */ UNUSED_RULE,
+    /* TOKEN_LEFT_PAREN */ PREFIX_SYMBOL(parentheses),
+    /* TOKEN_RIGHT_PAREN */ UNUSED_RULE,
+    /* TOKEN_LEFT_BRACKET */ {NULL, BP_CALL, listLiteral, subscript, subscriptMethodSignature},
+    /* TOKEN_RIGHT_BRACKET */ UNUSED_RULE,
 };
 
 // 语法分析的核心
