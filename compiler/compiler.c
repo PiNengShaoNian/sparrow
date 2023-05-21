@@ -117,6 +117,7 @@ static void compileProgram(CompileUnit *cu);
 static void infixOperator(CompileUnit *cu, UNUSED bool canAssign);
 static void emitMethodCall(CompileUnit *cu, const char *name,
                            uint32_t length, OpCode opCode, bool canAssign);
+static void unaryOperator(CompileUnit *cu, UNUSED bool canAssign);
 
 // 初始化CompileUnit
 static void initCompileUint(Parser *parser, CompileUnit *cu,
@@ -940,6 +941,83 @@ static void emitGetterMethodCall(CompileUnit *cu, Signature *sign, OpCode opCode
   emitCallBySignature(cu, &newSign, opCode);
 }
 
+// 用占位符做为参数设置指令
+static uint32_t emitInstrWithPlaceholder(CompileUnit *cu, OpCode opCode)
+{
+  writeOpCode(cu, opCode);
+  writeByte(cu, 0xff); // 先写入高位的0xff
+
+  // 再写入低位的0xff后,减1返回高位地址,此地址将来用于回填.
+  return writeByte(cu, 0xff) - 1;
+}
+
+// 用跳转到当前字节码结束地址的偏移量去替换占位符参数0xffff
+// absIndex是指令流中绝对索引
+static void patchPlaceholder(CompileUnit *cu, uint32_t absIndex)
+{
+  // 计算回填地址(索引)
+  uint32_t offset = cu->fn->instrStream.count - absIndex - 2;
+
+  // 先回填地址高8位
+  cu->fn->instrStream.datas[absIndex] = (offset >> 8) & 0xff;
+
+  // 再回填地址低8位
+  cu->fn->instrStream.datas[absIndex + 1] = offset & 0xff;
+}
+
+//'||'.led()
+static void logicOr(CompileUnit *cu, UNUSED bool canAssign)
+{
+  // 此时栈顶是条件表达式的结果,即"||"的左操作数
+
+  // 操作码OPCODE_OR会到栈顶获取条件
+  uint32_t placeholderIndex = emitInstrWithPlaceholder(cu, OPCODE_OR);
+
+  // 生成计算右操作数的指令
+  expression(cu, BP_LOGIC_OR);
+
+  // 用右表达式的实际结束地址回填OPCODE_OR操作码的占位符
+  patchPlaceholder(cu, placeholderIndex);
+}
+
+//'&&'.led()
+static void logicAnd(CompileUnit *cu, UNUSED bool canAssign)
+{
+  // 此时栈顶是条件表达式的结果,即"&&"的左操作数
+
+  // 操作码OPCODE_AND会到栈顶获取条件
+  uint32_t placeholderIndex = emitInstrWithPlaceholder(cu, OPCODE_AND);
+
+  // 生成计算右操作数的指令
+  expression(cu, BP_LOGIC_AND);
+
+  // 用右表达式的实际结束地址回填OPCODE_AND操作码的占位符
+  patchPlaceholder(cu, placeholderIndex);
+}
+
+//"? :".led()
+static void condition(CompileUnit *cu, UNUSED bool canAssign)
+{
+  // 若condition为false, if跳转到false分支的起始地址,为该地址设置占位符
+  uint32_t falseBranchStart = emitInstrWithPlaceholder(cu, OPCODE_JUMP_IF_FALSE);
+
+  // 编译true分支
+  expression(cu, BP_LOWEST);
+
+  // 执行完true分支后需要跳过false分支
+  uint32_t falseBranchEnd = emitInstrWithPlaceholder(cu, OPCODE_JUMP);
+
+  // 编译true分支已经结束.此时知道了true分支的结束地址,
+  // 编译false分支之前须先回填falseBranchStart
+  patchPlaceholder(cu, falseBranchStart);
+
+  // 编译false分支.
+  expression(cu, BP_LOWEST);
+
+  // 知道了false分支的结束地址,回填falseBranchEnd
+  patchPlaceholder(cu, falseBranchEnd);
+}
+
 // 生成方法调用指令,包括getter和setter
 static void emitMethodCall(CompileUnit *cu, const char *name,
                            uint32_t length, OpCode opCode, bool canAssign)
@@ -1418,7 +1496,29 @@ SymbolBindRule Rules[] = {
     /* TOKEN_LEFT_BRACE */ PREFIX_SYMBOL(mapLiteral),
     /* TOKEN_RIGHT_BRACE */ UNUSED_RULE,
     /* TOKEN_DOT */ INFIX_SYMBOL(BP_CALL, callEntry),
-};
+    /* TOKEN_DOT_DOT */ INFIX_OPERATOR("..", BP_RANGE),
+    /* TOKEN_ADD */ INFIX_OPERATOR("+", BP_TERM),
+    /* TOKEN_SUB */ MIX_OPERATOR("-"),
+    /* TOKEN_MUL */ INFIX_OPERATOR("*", BP_FACTOR),
+    /* TOKEN_DIV */ INFIX_OPERATOR("/", BP_FACTOR),
+    /* TOKEN_MOD */ INFIX_OPERATOR("%", BP_FACTOR),
+    /* TOKEN_ASSIGN */ UNUSED_RULE,
+    /* TOKEN_BIT_AND */ INFIX_OPERATOR("&", BP_BIT_AND),
+    /* TOKEN_BIT_OR */ INFIX_OPERATOR("|", BP_BIT_OR),
+    /* TOKEN_BIT_NOT */ PREFIX_OPERATOR("~"),
+    /* TOKEN_BIT_SHIFT_RIGHT */ INFIX_OPERATOR(">>", BP_BIT_SHIFT),
+    /* TOKEN_BIT_SHIFT_LEFT */ INFIX_OPERATOR("<<", BP_BIT_SHIFT),
+    /* TOKEN_LOGIC_AND */ INFIX_SYMBOL(BP_LOGIC_AND, logicAnd),
+    /* TOKEN_LOGIC_OR */ INFIX_SYMBOL(BP_LOGIC_OR, logicOr),
+    /* TOKEN_LOGIC_NOT */ PREFIX_OPERATOR("!"),
+    /* TOKEN_EQUAL */ INFIX_OPERATOR("==", BP_EQUAL),
+    /* TOKEN_NOT_EQUAL */ INFIX_OPERATOR("!=", BP_EQUAL),
+    /* TOKEN_GREATE */ INFIX_OPERATOR(">", BP_CMP),
+    /* TOKEN_GREATE_EQUAL */ INFIX_OPERATOR(">=", BP_CMP),
+    /* TOKEN_LESS */ INFIX_OPERATOR("<", BP_CMP),
+    /* TOKEN_LESS_EQUAL */ INFIX_OPERATOR("<=", BP_CMP),
+    /* TOKEN_QUESTION */ INFIX_SYMBOL(BP_ASSIGN, condition),
+    /* TOKEN_EOF */ UNUSED_RULE};
 
 // 语法分析的核心
 static void expression(CompileUnit *cu, BindPower rbp)
