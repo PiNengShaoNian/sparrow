@@ -115,6 +115,8 @@ static uint32_t addConstant(CompileUnit *cu, Value constant);
 static void expression(CompileUnit *cu, BindPower rbp);
 static void compileProgram(CompileUnit *cu);
 static void infixOperator(CompileUnit *cu, UNUSED bool canAssign);
+static void emitMethodCall(CompileUnit *cu, const char *name,
+                           uint32_t length, OpCode opCode, bool canAssign);
 
 // 初始化CompileUnit
 static void initCompileUint(Parser *parser, CompileUnit *cu,
@@ -471,6 +473,19 @@ static void emitLoadConstant(CompileUnit *cu, Value value)
 {
   int index = addConstant(cu, value);
   writeOpCodeShortOperand(cu, OPCODE_LOAD_CONSTANT, index);
+}
+
+//'.'.led() 编译方法调用,所有调用的入口
+static void callEntry(CompileUnit *cu, bool canAssign)
+{
+  // 本函数是'.'.led(),curToken是TOKEN_ID
+  // 本函数是'.'.led(),curToken是TOKEN_ID
+  consumeCurToken(cu->curParser,
+                  TOKEN_ID, "expect method name after '.'!");
+
+  // 生成方法调用指令
+  emitMethodCall(cu, cu->curParser->preToken.start,
+                 cu->curParser->preToken.length, OPCODE_CALL0, canAssign);
 }
 
 // 数字和字符串.nud() 编译字面量
@@ -1072,6 +1087,40 @@ static void subscriptMethodSignature(CompileUnit *cu, Signature *sign)
   trySetter(cu, sign); // 判断']'后面是否接'='为setter
 }
 
+// map对象字面量
+static void mapLiteral(CompileUnit *cu, UNUSED bool canAssign)
+{
+  // 本函数是'{'.nud(), curToken是key
+
+  // Map.new()新建map,为存储字面量中的"key->value"做准备
+
+  // 先加载类,用于调用方法时从该类的methods中定位方法
+  emitLoadModuleVar(cu, "Map");
+  // 再加载调用的方法,该方法将在上面加载的类中获取
+  emitCall(cu, 0, "new()", 5);
+
+  do
+  {
+    // 可以创建空map
+    if (PEEK_TOKEN(cu->curParser) == TOKEN_RIGHT_BRACE)
+      break;
+
+    // 读取key
+    expression(cu, BP_UNARY);
+
+    // 读入key后面的冒号
+    consumeCurToken(cu->curParser,
+                    TOKEN_COLON, "expect ':' after key!");
+
+    // 读取value
+    expression(cu, BP_LOWEST);
+
+    // 将entry添加到map中
+    emitCall(cu, 2, "addCore_(_,_)", 13);
+  } while (matchToken(cu->curParser, TOKEN_COMMA));
+  consumeCurToken(cu->curParser, TOKEN_RIGHT_BRACE, "map literal should end with \'}\'!");
+}
+
 // 内嵌表达式.nud()
 static void stringInterpolation(CompileUnit *cu, UNUSED bool canAssign)
 {
@@ -1366,6 +1415,9 @@ SymbolBindRule Rules[] = {
     /* TOKEN_RIGHT_PAREN */ UNUSED_RULE,
     /* TOKEN_LEFT_BRACKET */ {NULL, BP_CALL, listLiteral, subscript, subscriptMethodSignature},
     /* TOKEN_RIGHT_BRACKET */ UNUSED_RULE,
+    /* TOKEN_LEFT_BRACE */ PREFIX_SYMBOL(mapLiteral),
+    /* TOKEN_RIGHT_BRACE */ UNUSED_RULE,
+    /* TOKEN_DOT */ INFIX_SYMBOL(BP_CALL, callEntry),
 };
 
 // 语法分析的核心
