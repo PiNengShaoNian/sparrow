@@ -522,6 +522,34 @@ static int declareModuleVar(VM *vm, ObjModule *objModule,
   return addSymbol(vm, &objModule->moduleVarName, name, length);
 }
 
+// 丢掉作用域scopeDepth之内的局部变量
+static uint32_t discardLocalVar(CompileUnit *cu, int scopeDepth)
+{
+  ASSERT(cu->scopeDepth > -1, "upmost scope can`t exit!");
+
+  int localIdx = cu->localVarNum - 1;
+
+  // 变量作用域大于scodeDepth的为其内嵌作用域中的变量,
+  // 跳出scodeDepth时内层也没用了,要回收其局部变量.
+  while (localIdx >= 0 && cu->localVars[localIdx].scopeDepth >= scopeDepth)
+  {
+    if (cu->localVars[localIdx].isUpvalue)
+    {
+      // 如果此局量是其内层的upvalue就将其关闭
+      writeByte(cu, OPCODE_CLOSE_UPVALUE);
+    }
+    else
+    {
+      // 否则就弹出该变量回收空间
+      writeByte(cu, OPCODE_POP);
+    }
+    localIdx--;
+  }
+
+  // 返回丢掉的局部变量个数
+  return cu->localVarNum - 1 - localIdx;
+}
+
 // 返回包含cu->enclosingClassBK的最近的CompileUnit
 static CompileUnit *getEnclosingClassBKUnit(CompileUnit *cu)
 {
@@ -1915,7 +1943,7 @@ static void compileWhileStatement(CompileUnit *cu)
   // 设置循环体起始地址等等
   enterLoopSetting(cu, &loop);
   consumeCurToken(cu->curParser,
-                  TOKEN_LEFT_PAREN, "expect '(' befor conditino!");
+                  TOKEN_LEFT_PAREN, "expect '(' before condition!");
   // 生成计算条件表达式的指令步骤,结果在栈顶
   expression(cu, BP_LOWEST);
   consumeCurToken(cu->curParser,
@@ -1929,6 +1957,51 @@ static void compileWhileStatement(CompileUnit *cu)
   leaveLoopPatch(cu);
 }
 
+// 编译return
+inline static void compileReturn(CompileUnit *cu)
+{
+  if (PEEK_TOKEN(cu->curParser) == TOKEN_RIGHT_BRACE) // 空返回值
+  {
+    // 空return,NULL作为返回值
+    writeOpCode(cu, OPCODE_PUSH_NULL);
+  }
+  else // 有返回值
+  {
+    expression(cu, BP_LOWEST);
+  }
+  writeOpCode(cu, OPCODE_RETURN); // 将上面栈顶的值返回
+}
+
+// 编译break
+inline static void compileBreak(CompileUnit *cu)
+{
+  if (cu->curLoop == NULL)
+    COMPILE_ERROR(cu->curParser, "break should be used inside a loop!");
+
+  // 在退出循环体之前要丢掉循环体内的局部变量
+  discardLocalVar(cu, cu->curLoop->scopeDepth + 1);
+
+  // 由于用OPCODE_END表示break占位, 此时无须记录占位符的返回地址
+  emitInstrWithPlaceholder(cu, OPCODE_END);
+}
+
+// 编译continue
+inline static void compileContinue(CompileUnit *cu)
+{
+  if (cu->curLoop == NULL)
+    COMPILE_ERROR(cu->curParser, "continue should be used inside a loop!");
+
+  // 回收本作用域中局部变量在栈中的空间, +1是指循环体(包括循环条件)的作用域
+  // 不能在cu->localVars数组中去掉,
+  // 否则在continue语句后面若引用了前面的变量则提示找不到
+  discardLocalVar(cu, cu->curLoop->scopeDepth + 1);
+
+  int loopBackOffset = cu->fn->instrStream.count - cu->curLoop->condStartIndex + 2;
+
+  // 生成向回跳转的CODE_LOOP指令 即使ip -= loopBackOffset
+  writeOpCodeShortOperand(cu, OPCODE_LOOP, loopBackOffset);
+}
+
 // 编译语句(即程序中与声明,定义无关的、表示"动作"的代码)
 static void compileStatement(CompileUnit *cu)
 {
@@ -1936,6 +2009,12 @@ static void compileStatement(CompileUnit *cu)
     compileIfStatement(cu);
   else if (matchToken(cu->curParser, TOKEN_WHILE))
     compileWhileStatement(cu);
+  else if (matchToken(cu->curParser, TOKEN_RETURN))
+    compileReturn(cu);
+  else if (matchToken(cu->curParser, TOKEN_BREAK))
+    compileBreak(cu);
+  else if (matchToken(cu->curParser, TOKEN_CONTINUE))
+    compileContinue(cu);
 }
 
 // 编译程序
