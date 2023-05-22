@@ -118,6 +118,7 @@ static void infixOperator(CompileUnit *cu, UNUSED bool canAssign);
 static void emitMethodCall(CompileUnit *cu, const char *name,
                            uint32_t length, OpCode opCode, bool canAssign);
 static void unaryOperator(CompileUnit *cu, UNUSED bool canAssign);
+static void compileStatement(CompileUnit *cu);
 
 // 初始化CompileUnit
 static void initCompileUint(Parser *parser, CompileUnit *cu,
@@ -1703,6 +1704,51 @@ static UNUSED void compileVarDefinition(CompileUnit *cu, bool isStatic)
 
   uint32_t index = declareVariable(cu, name.start, name.length);
   defineVariable(cu, index);
+}
+
+// 编译if语句
+static void compileIfStatement(CompileUnit *cu)
+{
+  consumeCurToken(cu->curParser, TOKEN_LEFT_PAREN, "missing '(' after if!");
+  expression(cu, BP_LOWEST); // 生成计算if条件表达式的指令步骤
+  consumeCurToken(cu->curParser,
+                  TOKEN_RIGHT_PAREN, "missing ')' before '{' in if!");
+
+  // 若条件为假, if跳转到false分支的起始地址,现为该地址设置占位符
+  uint32_t falseBranchStart =
+      emitInstrWithPlaceholder(cu, OPCODE_JUMP_IF_FALSE);
+
+  // 编译then分支
+  // 代码块前后的'{'和'}'由compileStatement负责读取
+  compileStatement(cu);
+
+  // 如果有else分支
+  if (matchToken(cu->curParser, TOKEN_ELSE))
+  {
+    // 添加跳过else分支的跳转指令
+    uint32_t falseBranchEnd = emitInstrWithPlaceholder(cu, OPCODE_JUMP);
+
+    // 进入else分支编译之前,先回填falseBranchStart
+    patchPlaceholder(cu, falseBranchStart);
+
+    // 编译else分支
+    compileStatement(cu);
+
+    // 此时知道了false块的结束地址,回填falseBranchEnd
+    patchPlaceholder(cu, falseBranchEnd);
+  }
+  else // 若不包括else块
+  {
+    // 此时falseBranchStart就是件为假时,需要跳过整个true分支的目标地址
+    patchPlaceholder(cu, falseBranchStart);
+  }
+}
+
+// 编译语句(即程序中与声明,定义无关的、表示"动作"的代码)
+static void compileStatement(CompileUnit *cu)
+{
+  if (matchToken(cu->curParser, TOKEN_IF))
+    compileIfStatement(cu);
 }
 
 // 编译程序
