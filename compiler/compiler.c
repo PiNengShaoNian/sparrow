@@ -550,6 +550,29 @@ static uint32_t discardLocalVar(CompileUnit *cu, int scopeDepth)
   return cu->localVarNum - 1 - localIdx;
 }
 
+// 进入新作用域
+static void enterScope(CompileUnit *cu)
+{
+  // 进入内嵌作用域
+  cu->scopeDepth++;
+}
+
+// 退出作用域
+static void leaveScope(CompileUnit *cu)
+{
+  // 对于非模块编译单元,丢弃局部变量
+  if (cu->enclosingUnit != NULL)
+  {
+    // 出作用域后丢弃本作用域以内的局部变量
+    uint32_t discardNum = discardLocalVar(cu, cu->scopeDepth);
+    cu->localVarNum -= discardNum;
+    cu->stackSlotNum -= discardNum;
+  }
+
+  // 回到上一层作用域
+  cu->scopeDepth--;
+}
+
 // 返回包含cu->enclosingClassBK的最近的CompileUnit
 static CompileUnit *getEnclosingClassBKUnit(CompileUnit *cu)
 {
@@ -1957,6 +1980,90 @@ static void compileWhileStatement(CompileUnit *cu)
   leaveLoopPatch(cu);
 }
 
+// 编译for循环,如 for i (sequence) {循环体}
+static void compileForStatement(CompileUnit *cu)
+{
+  // 其中sequence是可迭代的序列
+
+  // for循环会按照while循环的逻辑编译
+  //    for i (sequence) {
+  //       System.print(i)
+  //    }
+  //
+  // 在内部会变成:
+  //    var seq = sequence
+  //    var iter
+  //    while iter = seq.iterate(iter) {
+  //       var i = seq.iteratorValue(iter)
+  //       System.print(i)
+  //    }
+
+  // 为局部变量seq和iter创建作用域
+  enterScope(cu);
+
+  // 读取循环变量的名字,如"for i (sequence)"中"i"
+  consumeCurToken(cu->curParser,
+                  TOKEN_ID, "expect variable after for!");
+  const char *loopVarName = cu->curParser->preToken.start;
+  uint32_t loopVarLen = cu->curParser->preToken.length;
+
+  consumeCurToken(cu->curParser,
+                  TOKEN_LEFT_PAREN, "expect '(' befor sequence!");
+
+  // 编译迭代序列
+  expression(cu, BP_LOWEST);
+  consumeCurToken(cu->curParser, TOKEN_RIGHT_PAREN, "expect ')' after sequence!");
+
+  // 申请一局部变量"seq "来存储序列对象,
+  // 其值就是上面expression存储到栈中的结果
+  uint32_t seqSlot = addLocalVar(cu, "seq ", 4);
+
+  writeOpCode(cu, OPCODE_PUSH_NULL);
+  // 分配及初始化"iter ",其值就是上面加载到栈中的的NULL
+  uint32_t iterSlot = addLocalVar(cu, "iter ", 5);
+  Loop loop;
+  enterLoopSetting(cu, &loop);
+
+  // 为调用"seq.iterate(iter)"做准备
+  // 1 先压入序列对象"seq ", 即"seq.iterate(iter)"中的seq
+  writeOpCodeByteOperand(cu, OPCODE_LOAD_LOCAL_VAR, seqSlot);
+  // 2 再压入参数iter,即"seq.iterate(iter)"中的iter
+  writeOpCodeByteOperand(cu, OPCODE_LOAD_LOCAL_VAR, iterSlot);
+  // 3 调用"seq.iterate(iter)"
+  emitCall(cu, 1, "iterate(_)", 10);
+
+  //"seq.iterate(iter)"把结果(下一个迭代器)存储到
+  // args[0](即栈顶),现在将其同步到变量iter
+  writeOpCodeByteOperand(cu, OPCODE_STORE_LOCAL_VAR, iterSlot);
+
+  // 如果条件失败则跳出循环体,目前不知道循环体的结束地址,
+  // 先写入占位符.
+  loop.exitIndex = emitInstrWithPlaceholder(cu, OPCODE_JUMP_IF_FALSE);
+
+  // 调用"seq.iteratorValue(iter)"以获取值
+  // 1 为调用"seq.iteratorValue(iter)"压入参数seq
+  writeOpCodeByteOperand(cu, OPCODE_LOAD_LOCAL_VAR, seqSlot);
+  // 2 为调用"seq.iteratorValue(iter)"压入参数iter
+  writeOpCodeByteOperand(cu, OPCODE_LOAD_LOCAL_VAR, iterSlot);
+  // 3 调用"seq.iteratorValue(iter)"
+  emitCall(cu, 1, "iteratorValue(_)", 16);
+
+  // 为循环变量i创建作用域
+  enterScope(cu);
+  //"seq.iteratorValue(iter)"已经把结果存储到栈顶,
+  // 添加循环变量为局部变量,其值在栈顶
+  addLocalVar(cu, loopVarName, loopVarLen);
+
+  // 编译循环体
+  compileLoopBody(cu);
+
+  leaveScope(cu); // 离开循环变量i的作用域
+
+  leaveLoopPatch(cu);
+
+  leaveScope(cu); // 离开变量"seq "和"iter "的作用域
+}
+
 // 编译return
 inline static void compileReturn(CompileUnit *cu)
 {
@@ -2009,6 +2116,8 @@ static void compileStatement(CompileUnit *cu)
     compileIfStatement(cu);
   else if (matchToken(cu->curParser, TOKEN_WHILE))
     compileWhileStatement(cu);
+  else if (matchToken(cu->curParser, TOKEN_FOR))
+    compileForStatement(cu);
   else if (matchToken(cu->curParser, TOKEN_RETURN))
     compileReturn(cu);
   else if (matchToken(cu->curParser, TOKEN_BREAK))
