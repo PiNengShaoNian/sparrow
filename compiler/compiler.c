@@ -122,7 +122,7 @@ static void compileStatement(CompileUnit *cu);
 uint32_t getBytesOfOperands(Byte *instrStream,
                             Value *constants, int ip);
 // 初始化CompileUnit
-static void initCompileUint(Parser *parser, CompileUnit *cu,
+static void initCompileUnit(Parser *parser, CompileUnit *cu,
                             CompileUnit *enclosingUint, bool isMethod)
 {
   parser->curCompileUnit = cu;
@@ -987,7 +987,7 @@ static void emitGetterMethodCall(CompileUnit *cu, Signature *sign, OpCode opCode
     // 此时newSign.type也许还是GETTER,下面要将其设置为METHOD
     newSign.type = SIGN_METHOD;
     CompileUnit fnCU;
-    initCompileUint(cu->curParser, &fnCU, cu, false);
+    initCompileUnit(cu->curParser, &fnCU, cu, false);
 
     Signature tmpFnSign = {SIGN_METHOD, "", 0, 0}; // 临时用于编译函数
     if (matchToken(cu->curParser, TOKEN_BIT_OR))   // 若块参数也有参数
@@ -2151,7 +2151,7 @@ static void compileStatement(CompileUnit *cu)
 }
 
 // 声明方法
-static UNUSED int declareMethod(CompileUnit *cu, char *signStr, uint32_t length)
+static int declareMethod(CompileUnit *cu, char *signStr, uint32_t length)
 {
   // 确保方法被录入到vm->allMethodNames
   int index = ensureSymbolExist(cu->curParser->vm,
@@ -2179,8 +2179,8 @@ static UNUSED int declareMethod(CompileUnit *cu, char *signStr, uint32_t length)
 }
 
 // 将方法methodIndex指代的方法塞入classVar指代的class.methods中
-static UNUSED void defineMethod(CompileUnit *cu,
-                                Variable classVar, bool isStatic, int methodIndex)
+static void defineMethod(CompileUnit *cu,
+                         Variable classVar, bool isStatic, int methodIndex)
 {
   // 1 待绑定的方法在调用本函数之前已经放到栈顶了
 
@@ -2218,6 +2218,91 @@ static void emitCreateInstance(CompileUnit *cu,
 #endif
 }
 
+// 编译方法定义,isStatic表示是否在编译静态方法
+static void compileMethod(CompileUnit *cu, Variable classVar, bool isStatic)
+{
+  // inStatic表示是否为静态方法的编译单元
+  cu->enclosingClassBK->inStatic = isStatic;
+  methodSignatureFn methodSign =
+      Rules[cu->curParser->curToken.type].methodSign;
+  if (methodSign == NULL)
+    COMPILE_ERROR(cu->curParser, "method need signature function!");
+
+  Signature sign;
+  // curToken是方法名
+  sign.name = cu->curParser->curToken.start;
+  sign.length = cu->curParser->curToken.length;
+  sign.argNum = 0;
+
+  cu->enclosingClassBK->signature = &sign;
+  getNextToken(cu->curParser);
+
+  // 为了将函数或方法自己的指令流和局部变量单独存储,
+  // 每个函数或方法都有自己的CompileUnit.
+  CompileUnit methodCU;
+  // 编译一个方法啦,因此形参isMethod为true
+  initCompileUnit(cu->curParser, &methodCU, cu, true);
+
+  // 构造签名
+  methodSign(&methodCU, &sign);
+  consumeCurToken(cu->curParser, TOKEN_LEFT_BRACE,
+                  "expect '{' at the beginning of method body.");
+
+  if (cu->enclosingClassBK->inStatic && sign.type == SIGN_CONSTRUCT)
+    COMPILE_ERROR(cu->curParser, "constructor is not allowed to be static!");
+
+  char signatureString[MAX_SIGN_LEN] = {'\0'};
+  uint32_t signLen = sign2String(&sign, signatureString);
+
+  // 将方法声明
+  uint32_t methodIndex = declareMethod(cu, signatureString, signLen);
+
+  // 编译方法体指令流到方法自己的编译单元methodCU
+  compileBody(&methodCU, sign.type == SIGN_CONSTRUCT);
+
+#if DEBUG
+  // 结束编译并创建方法闭包
+  endCompileUnit(&methodCU, signatureString, signLen);
+#else
+  // 结束编译并创建方法闭包
+  endCompileUnit(&methodCU);
+#endif
+
+  // 定义方法:将上面创建的方法闭包绑定到类
+  defineMethod(cu, classVar, cu->enclosingClassBK->inStatic, methodIndex);
+
+  if (sign.type == SIGN_CONSTRUCT)
+  {
+    sign.type = SIGN_METHOD;
+    char signatureString[MAX_SIGN_LEN] = {'\0'};
+    uint32_t signLen = sign2String(&sign, signatureString);
+
+    uint32_t constructorIndex = ensureSymbolExist(cu->curParser->vm,
+                                                  &cu->curParser->vm->allMethodNames, signatureString, signLen);
+
+    emitCreateInstance(cu, &sign, methodIndex);
+
+    // 构造函数是静态方法,即类方法
+    defineMethod(cu, classVar, true, constructorIndex);
+  }
+}
+
+// 编译类体
+static UNUSED void compileClassBody(CompileUnit *cu, Variable classVar)
+{
+  if (matchToken(cu->curParser, TOKEN_STATIC))
+  {
+    if (matchToken(cu->curParser, TOKEN_VAR)) // 处理静态域 "static var id"
+      compileVarDefinition(cu, true);
+    else
+      compileMethod(cu, classVar, true);
+  }
+  else if (matchToken(cu->curParser, TOKEN_VAR)) // 实例域
+    compileVarDefinition(cu, false);
+  else // 类的方法
+    compileMethod(cu, classVar, false);
+}
+
 // 编译程序
 static void compileProgram(UNUSED CompileUnit *cu)
 {
@@ -2245,7 +2330,7 @@ ObjFn *compileModule(UNUSED VM *vm, UNUSED ObjModule *objModule,
   }
 
   CompileUnit moduleCU;
-  initCompileUint(&parser, &moduleCU, NULL, false);
+  initCompileUnit(&parser, &moduleCU, NULL, false);
 
   // 记录现在模块变量的数量,后面检查预定义模块变量时可减少遍历
   UNUSED uint32_t moduleVarNumBefor = objModule->moduleVarName.count;
