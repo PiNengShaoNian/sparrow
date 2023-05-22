@@ -2124,6 +2124,22 @@ static void compileStatement(CompileUnit *cu)
     compileBreak(cu);
   else if (matchToken(cu->curParser, TOKEN_CONTINUE))
     compileContinue(cu);
+  else if (matchToken(cu->curParser, TOKEN_LEFT_BRACE))
+  {
+    // 代码块有单独的作用域
+    enterScope(cu);
+    compileBlock(cu);
+    leaveScope(cu);
+  }
+  else
+  {
+    // 若不是以上的语法结构则是单一表达式
+    // 若不是以上的语法结构则是单一表达式
+    expression(cu, BP_LOWEST);
+
+    // 表达式的结果不重要,弹出栈顶结果
+    writeOpCode(cu, OPCODE_POP);
+  }
 }
 
 // 编译程序
