@@ -2194,6 +2194,30 @@ static UNUSED void defineMethod(CompileUnit *cu,
   writeOpCodeShortOperand(cu, opCode, methodIndex);
 }
 
+// 分两步创建实例,constructorIndex是构造函数的索引
+static void emitCreateInstance(CompileUnit *cu,
+                               Signature *sign, uint32_t constructorIndex)
+{
+  CompileUnit methodCU;
+  initCompileUnit(cu->curParser, &methodCU, cu, true);
+
+  // 1 生成OPCODE_CONSTRUCT指令,该指令生成新实例存储到stack[0].
+  writeOpCode(&methodCU, OPCODE_CONSTRUCT);
+
+  // 2 生成OPCODE_CALLx指令,该指令调用新实例的构造函数.
+  writeOpCodeShortOperand(&methodCU,
+                          (OpCode)(OPCODE_CALL0 + sign->argNum), constructorIndex);
+
+  // 生成return指令,将栈顶中的实例返回
+  writeOpCode(&methodCU, OPCODE_RETURN);
+
+#if DEBUG
+  endCompileUnit(&methodCU, "", 0);
+#else
+  endCompileUnit(&methodCU);
+#endif
+}
+
 // 编译程序
 static void compileProgram(UNUSED CompileUnit *cu)
 {
