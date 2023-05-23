@@ -40,6 +40,7 @@ struct vm
     SymbolTable allMethodNames; //(所有)类的方法名
     Parser *curParser;          // 当前此法分析器
     ObjMap *allModules;
+    ObjThread *curThread; // 当前正在执行的线程
 };
 
 void initVM(VM *vm);
@@ -47,5 +48,7 @@ void initVM(VM *vm);
 VM *newVM(void);
 
 void ensureStack(VM *vm, ObjThread *objThread, uint32_t neededSlots);
+
+VMResult executeInstruction(VM *vm, register ObjThread *curThread);
 
 #endif // _VM_VM_H
