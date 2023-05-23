@@ -119,8 +119,7 @@ static void emitMethodCall(CompileUnit *cu, const char *name,
                            uint32_t length, OpCode opCode, bool canAssign);
 static void unaryOperator(CompileUnit *cu, UNUSED bool canAssign);
 static void compileStatement(CompileUnit *cu);
-uint32_t getBytesOfOperands(Byte *instrStream,
-                            Value *constants, int ip);
+
 // 初始化CompileUnit
 static void initCompileUnit(Parser *parser, CompileUnit *cu,
                             CompileUnit *enclosingUint, bool isMethod)

@@ -183,3 +183,97 @@ static UNUSED void validateSuperClass(VM *vm, Value classNameValue, uint32_t fie
     if (superClass->fieldNum + fieldNum > MAX_FIELD_NUM)
         RUN_ERROR("number of field including super exceed %d!", MAX_FIELD_NUM);
 }
+
+// 修正部分指令操作数
+static void patchOperand(Class *class, ObjFn *fn)
+{
+    int ip = 0;
+    OpCode opCode;
+    while (true)
+    {
+        opCode = (OpCode)fn->instrStream.datas[ip++];
+        switch (opCode)
+        {
+        case OPCODE_LOAD_FIELD:
+        case OPCODE_STORE_FIELD:
+        case OPCODE_LOAD_THIS_FIELD:
+        case OPCODE_STORE_THIS_FIELD:
+            // 修正子类的field数目  参数是1字节
+            fn->instrStream.datas[ip++] += class->superClass->fieldNum;
+            break;
+        case OPCODE_SUPER0:
+        case OPCODE_SUPER1:
+        case OPCODE_SUPER2:
+        case OPCODE_SUPER3:
+        case OPCODE_SUPER4:
+        case OPCODE_SUPER5:
+        case OPCODE_SUPER6:
+        case OPCODE_SUPER7:
+        case OPCODE_SUPER8:
+        case OPCODE_SUPER9:
+        case OPCODE_SUPER10:
+        case OPCODE_SUPER11:
+        case OPCODE_SUPER12:
+        case OPCODE_SUPER13:
+        case OPCODE_SUPER14:
+        case OPCODE_SUPER15:
+        case OPCODE_SUPER16:
+        {
+            // 指令流1: 2字节的method索引
+            // 指令流2: 2字节的基类常量索引
+
+            ip += 2; // 跳过2字节的method索引
+            uint32_t superClassIdx =
+                (fn->instrStream.datas[ip] << 8) | fn->instrStream.datas[ip + 1];
+
+            // 回填在函数emitCallBySignature中的占位VT_TO_VALUE(VT_NULL)
+            fn->constants.datas[superClassIdx] = OBJ_TO_VALUE(class->superClass);
+
+            ip += 2; // 跳过2字节的基类索引
+
+            break;
+        }
+        case OPCODE_CREATE_CLOSURE:
+        {
+            // 指令流: 2字节待创建闭包的函数在常量表中的索引+函数所用的upvalue数 * 2
+
+            // 函数是存储到常量表中,获取待创建闭包的函数在常量表中的索引
+            uint32_t fnIdx = (fn->instrStream.datas[ip] << 8) | fn->instrStream.datas[ip + 1];
+
+            // 递归进入该函数的指令流,继续为其中的super和field修正操作数
+            patchOperand(class, VALUE_TO_OBJFN(fn->constants.datas[fnIdx]));
+
+            // ip-1是操作码OPCODE_CREATE_CLOSURE,
+            // 闭包中的参数涉及到upvalue,调用getBytesOfOperands获得参数字节数
+            ip += getBytesOfOperands(fn->instrStream.datas, fn->constants.datas, ip - 1);
+            break;
+        }
+        case OPCODE_END:
+            // 用于从当前及递归嵌套闭包时返回
+            return;
+        default:
+            // 其它指令不需要回填因此就跳过
+            ip += getBytesOfOperands(fn->instrStream.datas, fn->constants.datas, ip - 1);
+            break;
+        }
+    }
+}
+
+// 绑定方法和修正操作数
+static UNUSED void bindMethodAndPatch(VM *vm, OpCode opCode,
+                                      uint32_t methodIndex, Class *class, Value methodValue)
+{
+    // 如果是静态方法,就将类指向meta类(使接收者为meta类)
+    if (opCode == OPCODE_STATIC_METHOD)
+        class = class->objHeader.class;
+
+    Method method;
+    method.type = MT_SCRIPT;
+    method.obj = VALUE_TO_OBJCLOSURE(methodValue);
+
+    // 修正操作数
+    patchOperand(class, method.obj->fn);
+
+    // 修正过后,绑定method到class
+    bindMethod(vm, class, methodIndex, method);
+}
