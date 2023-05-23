@@ -2378,6 +2378,76 @@ static UNUSED void compileClassDefinition(CompileUnit *cu)
   leaveScope(cu);
 }
 
+// 编译函数定义
+static UNUSED void compileFunctionDefinition(CompileUnit *cu)
+{
+  // 本语言完全面向对象,
+  // (一)
+  //    函数定义的形式是:
+  //       var function = Fn.new {|形参|
+  //          函数体代码
+  //       }
+  //    Fn.new返回的是{}内函数的闭包
+
+  //    函数调用的形式是"函数闭包.call(...)"
+
+  //    但是传统上
+  // (二)
+  //    函数定义的形式是:
+  //       function 函数名(形参) {
+  //          函数体代码
+  //       }
+  //    函数调用形式是:
+  //       函数名(实参)
+
+  // fun关键字只用在模块作用域中
+  if (cu->enclosingUnit != NULL)
+    COMPILE_ERROR(cu->curParser, "'fun' should be in module scope!");
+
+  consumeCurToken(cu->curParser, TOKEN_ID, "missing function name!");
+
+  // 函数名加上"Fn "前缀做为模块变量存储
+  char fnName[MAX_SIGN_LEN + 4] = {'\0'}; //"fn xxx\0"
+  memmove(fnName, "Fn ", 3);              // 把函数名加上"Fn "前缀后做为变量名
+  memmove(fnName + 3, cu->curParser->preToken.start,
+          cu->curParser->preToken.length);
+
+  uint32_t fnNameIndex = declareVariable(cu, fnName, strlen(fnName));
+
+  // 生成fnCU,专用于存储函数指令流
+  CompileUnit fnCU;
+  initCompileUnit(cu->curParser, &fnCU, cu, false);
+
+  Signature tmpFnSign = {SIGN_METHOD, "", 0, 0}; // 临时用于编译函数
+  consumeCurToken(cu->curParser,
+                  TOKEN_LEFT_PAREN, "expect '(' after function name!");
+
+  // 若有形参则将形参声明局部变量
+  if (!matchToken(cu->curParser, TOKEN_RIGHT_PAREN))
+  {
+    processParaList(&fnCU, &tmpFnSign); // 将形参声明为函数的局部变量
+    consumeCurToken(cu->curParser,
+                    TOKEN_RIGHT_PAREN, "expect ')' after parameter list!");
+  }
+
+  fnCU.fn->argNum = tmpFnSign.argNum;
+
+  consumeCurToken(cu->curParser,
+                  TOKEN_LEFT_BRACE, "expect '{' at the beginning of method body.");
+
+  // 编译函数体,将指令流写进该函数自己的指令单元fnCu
+  compileBody(&fnCU, false);
+
+#if DEBUG
+  endCompileUnit(&fnCU, fnName, strlen(fnName));
+#else
+  endCompileUnit(&fnCU);
+#endif
+
+  // 将栈顶的闭包写入变量
+  defineVariable(cu, fnNameIndex);
+}
+
 // 编译程序
 static void compileProgram(UNUSED CompileUnit *cu)
 {
