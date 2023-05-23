@@ -3,6 +3,7 @@
 #include "vm.h"
 #include "utils.h"
 #include "core.h"
+#include "compiler.h"
 
 // 初始化虚拟机
 void initVM(VM *vm)
@@ -87,4 +88,98 @@ inline static void createFrame(VM *vm, ObjThread *objThread, ObjClosure *objClos
 
     // 准备上cpu
     prepareFrame(objThread, objClosure, objThread->esp - argNum);
+}
+
+// 关闭在栈中slot为lastSlot及之上的upvalue
+static UNUSED void closeUpvalue(ObjThread *objThread, Value *lastSlot)
+{
+    ObjUpvalue *upvalue = objThread->openUpvalues;
+    while (upvalue != NULL && upvalue->localVarPtr >= lastSlot)
+    {
+        // localVarPtr改指向本结构中的closedUpvalue
+        upvalue->closedUpvalue = *(upvalue->localVarPtr);
+        upvalue->localVarPtr = &(upvalue->closedUpvalue);
+
+        upvalue = upvalue->next;
+    }
+    objThread->openUpvalues = upvalue;
+}
+
+// 创建线程已打开的upvalue链表，并将localVarPtr所属的upvalue以降序插入到该链表
+static UNUSED ObjUpvalue *createOpenUpvalue(VM *vm, ObjThread *objThread, Value *localVarPtr)
+{
+    // 如果openUpvalues链表为空就创建
+    if (objThread->openUpvalues == NULL)
+    {
+        objThread->openUpvalues = newObjUpvalue(vm, localVarPtr);
+        return objThread->openUpvalues;
+    }
+
+    // 下面以upvalue.localVarPtr降序组织openUpvalues
+    ObjUpvalue *preUpvalue = NULL;
+    ObjUpvalue *upvalue = objThread->openUpvalues;
+
+    // 后面的代码保证了openUpvalues按照降顺组织,
+    // 下面向堆栈的底部遍历,直到找到合适的插入位置
+    while (upvalue != NULL && upvalue->localVarPtr > localVarPtr)
+    {
+        preUpvalue = upvalue;
+        upvalue = upvalue->next;
+    }
+
+    // 如果之前已经插入了该upvalue则返回
+    if (upvalue != NULL && upvalue->localVarPtr == localVarPtr)
+        return upvalue;
+
+    // openUpvalues中未找到该upvalue,
+    // 现在就创建新upvalue,按照降序插入到链表
+    ObjUpvalue *newUpvalue = newObjUpvalue(vm, localVarPtr);
+
+    // 保证了openUpvalues首结点upvalue->localVarPtr的值是最高的
+    if (preUpvalue == NULL)
+    {
+        // 说明上面while的循环体未执行,新结点（形参localVarPtr）的值大于等于链表首结点
+        // 因此使链表结点指向它所在的新upvalue结点
+        objThread->openUpvalues = newUpvalue;
+    }
+    else
+    {
+        // preUpvalue已处于正确的位置
+        preUpvalue->next = newUpvalue;
+    }
+
+    newUpvalue->next = upvalue;
+
+    return newUpvalue; // 返回该结点
+}
+
+// 校验基类合法性
+static UNUSED void validateSuperClass(VM *vm, Value classNameValue, uint32_t fieldNum, Value superClassValue)
+{
+    // 首先确保superClass的类型得是class
+    if (!VALUE_IS_CLASS(superClassValue))
+    {
+        ObjString *classNameString = VALUE_TO_OBJSTR(classNameValue);
+        RUN_ERROR("class \"%s\" `s superClass is not a valid class!",
+                  classNameString->value.start);
+    }
+
+    Class *superClass = VALUE_TO_CLASS(superClassValue);
+
+    // 基类不允许为内建类
+    if (superClass == vm->stringClass ||
+        superClass == vm->mapClass ||
+        superClass == vm->rangeClass ||
+        superClass == vm->listClass ||
+        superClass == vm->nullClass ||
+        superClass == vm->boolClass ||
+        superClass == vm->numClass ||
+        superClass == vm->fnClass ||
+        superClass == vm->threadClass)
+        RUN_ERROR("superClass mustn`t be a builtin class!");
+
+    // 子类也要继承基类的域,
+    // 故子类自己的域+基类域的数量不可超过MAX_FIELD_NUM
+    if (superClass->fieldNum + fieldNum > MAX_FIELD_NUM)
+        RUN_ERROR("number of field including super exceed %d!", MAX_FIELD_NUM);
 }
