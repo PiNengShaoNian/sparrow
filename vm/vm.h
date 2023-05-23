@@ -5,6 +5,7 @@
 #include "header_obj.h"
 #include "class.h"
 #include "obj_map.h"
+#include "obj_thread.h"
 
 // 为定义在opcode.inc中的操作码加上前缀"OPCODE_"
 #define OPCODE_SLOTS(opcode, effect) OPCODE_##opcode,
@@ -44,5 +45,7 @@ struct vm
 void initVM(VM *vm);
 
 VM *newVM(void);
+
+void ensureStack(VM *vm, ObjThread *objThread, uint32_t neededSlots);
 
 #endif // _VM_VM_H
