@@ -207,7 +207,7 @@ inline static void writeShortOperand(CompileUnit *cu, int operand)
 }
 
 // 写入操作数为1字节大小的指令
-static UNUSED int writeOpCodeByteOperand(CompileUnit *cu, OpCode opCode, int operand)
+static int writeOpCodeByteOperand(CompileUnit *cu, OpCode opCode, int operand)
 {
   writeOpCode(cu, opCode);
   return writeByteOperand(cu, operand);
@@ -427,14 +427,14 @@ static int declareVariable(CompileUnit *cu, const char *name, uint32_t length)
 }
 
 // 为单运算符方法创建签名
-static UNUSED void unaryMethodSignature(UNUSED CompileUnit *cu, UNUSED Signature *sign)
+static void unaryMethodSignature(UNUSED CompileUnit *cu, UNUSED Signature *sign)
 {
   // 名称部分在调用前已经完成,只修改类型
   sign->type = SIGN_GETTER;
 }
 
 // 为中缀运算符创建签名
-static UNUSED void infixMethodSignature(CompileUnit *cu, Signature *sign)
+static void infixMethodSignature(CompileUnit *cu, Signature *sign)
 {
   // 在类中的运算符都是方法,类型为SIGN_METHOD
   sign->type = SIGN_METHOD;
@@ -448,7 +448,7 @@ static UNUSED void infixMethodSignature(CompileUnit *cu, Signature *sign)
 }
 
 // 为既做单运算符又做中缀运算符的符号方法创建签名
-static UNUSED void mixMethodSignature(CompileUnit *cu, Signature *sign)
+static void mixMethodSignature(CompileUnit *cu, Signature *sign)
 {
   // 假设是单运算符方法,因此默认为getter
 
@@ -1177,7 +1177,7 @@ static void emitLoadModuleVar(CompileUnit *cu, const char *name)
 }
 
 // 生成存储模块变量的指令
-static UNUSED void emitStoreModuleVar(CompileUnit *cu, int index)
+static void emitStoreModuleVar(CompileUnit *cu, int index)
 {
   // 把栈顶数据存储到moduleVarValue[index]
   writeOpCodeShortOperand(cu, OPCODE_STORE_MODULE_VAR, index);
@@ -1636,7 +1636,7 @@ static void expression(CompileUnit *cu, BindPower rbp)
 }
 
 // 中缀运算符.led方法
-static UNUSED void infixOperator(CompileUnit *cu, UNUSED bool canAssign)
+static void infixOperator(CompileUnit *cu, UNUSED bool canAssign)
 {
   SymbolBindRule *rule = &Rules[cu->curParser->preToken.type];
 
@@ -1650,7 +1650,7 @@ static UNUSED void infixOperator(CompileUnit *cu, UNUSED bool canAssign)
 }
 
 // 前缀运算符.nud方法, 如'-','!'等
-static UNUSED void unaryOperator(CompileUnit *cu, UNUSED bool canAssign)
+static void unaryOperator(CompileUnit *cu, UNUSED bool canAssign)
 {
   SymbolBindRule *rule = &Rules[cu->curParser->preToken.type];
 
@@ -1663,7 +1663,7 @@ static UNUSED void unaryOperator(CompileUnit *cu, UNUSED bool canAssign)
 }
 
 // 编译变量定义
-static UNUSED void compileVarDefinition(CompileUnit *cu, bool isStatic)
+static void compileVarDefinition(CompileUnit *cu, bool isStatic)
 {
   consumeCurToken(cu->curParser, TOKEN_ID, "missing variable name!");
   Token name = cu->curParser->preToken;
@@ -2287,7 +2287,7 @@ static void compileMethod(CompileUnit *cu, Variable classVar, bool isStatic)
 }
 
 // 编译类体
-static UNUSED void compileClassBody(CompileUnit *cu, Variable classVar)
+static void compileClassBody(CompileUnit *cu, Variable classVar)
 {
   if (matchToken(cu->curParser, TOKEN_STATIC))
   {
@@ -2303,7 +2303,7 @@ static UNUSED void compileClassBody(CompileUnit *cu, Variable classVar)
 }
 
 // 编译类定义
-static UNUSED void compileClassDefinition(CompileUnit *cu)
+static void compileClassDefinition(CompileUnit *cu)
 {
   Variable classVar;
   if (cu->scopeDepth != -1) // 目前只支持在模块作用域定义类
@@ -2378,7 +2378,7 @@ static UNUSED void compileClassDefinition(CompileUnit *cu)
 }
 
 // 编译函数定义
-static UNUSED void compileFunctionDefinition(CompileUnit *cu)
+static void compileFunctionDefinition(CompileUnit *cu)
 {
   // 本语言完全面向对象,
   // (一)
@@ -2448,7 +2448,7 @@ static UNUSED void compileFunctionDefinition(CompileUnit *cu)
 }
 
 // 编译import导入
-static UNUSED void compileImport(CompileUnit *cu)
+static void compileImport(CompileUnit *cu)
 {
   //   import "foo"
   // 将按照以下形式处理:
@@ -2528,14 +2528,23 @@ static UNUSED void compileImport(CompileUnit *cu)
 }
 
 // 编译程序
-static void compileProgram(UNUSED CompileUnit *cu)
+static void compileProgram(CompileUnit *cu)
 {
-  ;
+  if (matchToken(cu->curParser, TOKEN_CLASS))
+    compileClassDefinition(cu);
+  else if (matchToken(cu->curParser, TOKEN_FUN))
+    compileFunctionDefinition(cu);
+  else if (matchToken(cu->curParser, TOKEN_VAR))
+    compileVarDefinition(cu, cu->curParser->preToken.type == TOKEN_STATIC);
+  else if (matchToken(cu->curParser, TOKEN_IMPORT))
+    compileImport(cu);
+  else
+    compileStatement(cu);
 }
 
 // 编译模块(目前是桩函数)
-ObjFn *compileModule(UNUSED VM *vm, UNUSED ObjModule *objModule,
-                     UNUSED const char *moduleCode)
+ObjFn *compileModule(VM *vm, ObjModule *objModule,
+                     const char *moduleCode)
 {
   // 各源码模块文件需要单独的parser
   Parser parser;
@@ -2557,7 +2566,7 @@ ObjFn *compileModule(UNUSED VM *vm, UNUSED ObjModule *objModule,
   initCompileUnit(&parser, &moduleCU, NULL, false);
 
   // 记录现在模块变量的数量,后面检查预定义模块变量时可减少遍历
-  UNUSED uint32_t moduleVarNumBefor = objModule->moduleVarName.count;
+  uint32_t moduleVarNumBefor = objModule->moduleVarName.count;
 
   // 初始的parser->curToken.type为TOKEN_UNKNOWN,下面使其指向第一个合法的token
   getNextToken(&parser);
@@ -2568,8 +2577,32 @@ ObjFn *compileModule(UNUSED VM *vm, UNUSED ObjModule *objModule,
     compileProgram(&moduleCU);
   }
 
-  // 后面还有很多要做的,临时放一句话在这提醒.
-  // 不过目前上面是死循环,本句无法执行。
-  printf("There is something to do...\n");
-  exit(0);
+  // 模块编译完成,生成return null返回,避免执行下面endCompileUnit中添加的OPCODE_END
+  writeOpCode(&moduleCU, OPCODE_PUSH_NULL);
+  writeOpCode(&moduleCU, OPCODE_RETURN);
+
+  // 检查在函数id中用行号声明的模块变量是否在引用之后有定义
+  uint32_t idx = moduleVarNumBefor;
+  while (idx < objModule->moduleVarValue.count)
+  {
+    // 为简单起见,依然是遇到第一个错后就报错退出,后面的不再检查
+    if (VALUE_IS_NUM(objModule->moduleVarValue.datas[idx]))
+    {
+      char *str = objModule->moduleVarName.datas[idx].str;
+      ASSERT(str[objModule->moduleVarName.datas[idx].length] == '\0',
+             "module var name is not closed!");
+      uint32_t lineNo = VALUE_TO_NUM(objModule->moduleVarValue.datas[idx]);
+      COMPILE_ERROR(&parser, "line:%d, variable \'%s\' not defined!", lineNo, str);
+    }
+    idx++;
+  }
+
+  // 模块编译完成,当前编译单元置空
+  vm->curParser->curCompileUnit = NULL;
+  vm->curParser = vm->curParser->parent;
+#if DEBUG
+  return endCompileUnit(&moduleCU, "(script)", 8);
+#else
+  return endCompileUnit(&moduleCU);
+#endif
 }

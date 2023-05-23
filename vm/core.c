@@ -214,10 +214,10 @@ static ObjThread *loadModule(VM *vm, Value moduleName, const char *moduleCode)
 }
 
 // 执行模块,目前为空,桩函数
-VMResult executeModule(UNUSED VM *vm, UNUSED Value moduleName, UNUSED const char *moduleCode)
+VMResult executeModule(VM *vm, Value moduleName, const char *moduleCode)
 {
-  UNUSED ObjThread *objThread = loadModule(vm, moduleName, moduleCode);
-  return VM_RESULT_ERROR;
+  ObjThread *objThread = loadModule(vm, moduleName, moduleCode);
+  return executeInstruction(vm, objThread);
 }
 
 // 确保符号已经加到符号表
