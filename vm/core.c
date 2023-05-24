@@ -143,6 +143,23 @@ static bool primObjectMetaSame(VM *vm UNUSED, Value *args)
   RET_VALUE(boolValue);
 }
 
+// 返回bool的字符串形式:"true"或"false"
+static bool primBoolToString(VM *vm, Value *args)
+{
+  ObjString *objString;
+  if (VALUE_TO_BOOL(args[0])) // 若为VT_TRUE
+    objString = newObjString(vm, "true", 4);
+  else
+    objString = newObjString(vm, "false", 5);
+  RET_OBJ(objString);
+}
+
+// bool值取反
+static bool primBoolNot(UNUSED VM *vm, Value *args)
+{
+  RET_BOOL(!VALUE_TO_BOOL(args[0]));
+}
+
 // 读取源代码文件
 char *readFile(const char *path)
 {
@@ -164,6 +181,20 @@ char *readFile(const char *path)
 
   fclose(file);
   return fileContent;
+}
+
+// 返回核心类name的value结构
+static Value getCoreClassValue(ObjModule *objModule, const char *name)
+{
+  int index = getIndexFromSymbolTable(&objModule->moduleVarName,
+                                      name, strlen(name));
+  if (index == -1)
+  {
+    char id[MAX_ID_LEN] = {'\0'};
+    memcpy(id, name, strlen(name));
+    RUN_ERROR("something wrong occur: missing core class \"%s\"!", id);
+  }
+  return objModule->moduleVarValue.datas[index];
 }
 
 // 从modules中获取名为moduleName的模块
@@ -269,6 +300,7 @@ void bindSuperClass(VM *vm, Class *subClass, Class *superClass)
   }
 }
 
+extern char *coreModuleCode;
 // 编译核心模块
 void buildCore(VM *vm)
 {
@@ -308,6 +340,14 @@ void buildCore(VM *vm)
   vm->objectClass->objHeader.class = objectMetaclass;
   objectMetaclass->objHeader.class = vm->classOfClass;
   vm->classOfClass->objHeader.class = vm->classOfClass; // 元信息类回路,meta类终点
+
+  // 执行核心模块
+  executeModule(vm, CORE_MODULE, coreModuleCode);
+
+  // Bool类定义在core.script.inc中,将其挂载Bool类到vm->boolClass
+  vm->boolClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "Bool"));
+  PRIM_METHOD_BIND(vm->boolClass, "toString", primBoolToString);
+  PRIM_METHOD_BIND(vm->boolClass, "!", primBoolNot);
 }
 
 // table中查找符号symbol 找到后返回索引,否则返回-1
