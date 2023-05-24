@@ -318,6 +318,19 @@ static bool primFnNew(VM *vm, Value *args)
   RET_VALUE(args[1]);
 }
 
+// null取非
+static bool primNullNot(UNUSED VM *vm, UNUSED Value *args)
+{
+  RET_VALUE(BOOL_TO_VALUE(true));
+}
+
+// null的字符串化
+static bool primNullToString(UNUSED VM *vm, UNUSED Value *args)
+{
+  ObjString *objString = newObjString(vm, "null", 4);
+  RET_OBJ(objString);
+}
+
 // 读取源代码文件
 char *readFile(const char *path)
 {
@@ -553,8 +566,12 @@ void buildCore(VM *vm)
   bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_)");
   bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_,_)");
   bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_)");
-}
 
+  // 绑定Null类的方法
+  vm->nullClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "Null"));
+  PRIM_METHOD_BIND(vm->nullClass, "!", primNullNot);
+  PRIM_METHOD_BIND(vm->nullClass, "toString", primNullToString);
+}
 // table中查找符号symbol 找到后返回索引,否则返回-1
 int getIndexFromSymbolTable(SymbolTable *table, const char *symbol, uint32_t length)
 {
