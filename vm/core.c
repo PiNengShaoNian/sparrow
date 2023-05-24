@@ -307,6 +307,17 @@ static bool primThreadIsDone(UNUSED VM *vm, Value *args)
   RET_BOOL(objThread->usedFrameNum == 0 || !VALUE_IS_NULL(objThread->errorObj));
 }
 
+// Fn.new(_):新建一个函数对象
+static bool primFnNew(VM *vm, Value *args)
+{
+  // 代码块为参数必为闭包
+  if (!validateFn(vm, args[1]))
+    return false;
+
+  // 直接返回函数闭包
+  RET_VALUE(args[1]);
+}
+
 // 读取源代码文件
 char *readFile(const char *path)
 {
@@ -447,6 +458,15 @@ void bindSuperClass(VM *vm, Class *subClass, Class *superClass)
   }
 }
 
+// 绑定fn.call的重载
+static void bindFnOverloadCall(VM *vm, const char *sign)
+{
+  uint32_t index = ensureSymbolExist(vm, &vm->allMethodNames, sign, strlen(sign));
+  // 构造method
+  Method method = {MT_FN_CALL, {0}};
+  bindMethod(vm, vm->fnClass, index, method);
+}
+
 extern char *coreModuleCode;
 // 编译核心模块
 void buildCore(VM *vm)
@@ -510,6 +530,29 @@ void buildCore(VM *vm)
   PRIM_METHOD_BIND(vm->threadClass, "call()", primThreadCallWithoutArg);
   PRIM_METHOD_BIND(vm->threadClass, "call(_)", primThreadCallWithArg);
   PRIM_METHOD_BIND(vm->threadClass, "isDone", primThreadIsDone);
+
+  // 绑定函数类
+  vm->fnClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "Fn"));
+  PRIM_METHOD_BIND(vm->fnClass->objHeader.class, "new(_)", primFnNew);
+
+  // 绑定call的重载方法
+  bindFnOverloadCall(vm, "call()");
+  bindFnOverloadCall(vm, "call(_)");
+  bindFnOverloadCall(vm, "call(_,_)");
+  bindFnOverloadCall(vm, "call(_,_,_)");
+  bindFnOverloadCall(vm, "call(_,_,_,_)");
+  bindFnOverloadCall(vm, "call(_,_,_,_,_)");
+  bindFnOverloadCall(vm, "call(_,_,_,_,_,_)");
+  bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_)");
+  bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_)");
+  bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_,_)");
+  bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_,_,_)");
+  bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_)");
+  bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_,_)");
+  bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_,_,_)");
+  bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_)");
+  bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_,_)");
+  bindFnOverloadCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_)");
 }
 
 // table中查找符号symbol 找到后返回索引,否则返回-1
