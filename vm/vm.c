@@ -5,6 +5,21 @@
 #include "core.h"
 #include "compiler.h"
 
+// 把obj做为临时的根对象,就是把obj添加为gc的白名单,避免被gc回收
+void pushTmpRoot(VM *vm, ObjHeader *obj)
+{
+    ASSERT(obj != NULL, "root obj is null!");
+    ASSERT(vm->tmpRootNum < MAX_TEMP_ROOTS_NUM, "temporary roots too much!");
+    vm->tmpRoots[vm->tmpRootNum++] = obj;
+}
+
+// 去掉临时的根对象
+void popTmpRoot(VM *vm)
+{
+    ASSERT(vm->tmpRootNum < MAX_TEMP_ROOTS_NUM, "temporary roots too much!");
+    vm->tmpRootNum--;
+}
+
 // 初始化虚拟机
 void initVM(VM *vm)
 {
@@ -13,6 +28,22 @@ void initVM(VM *vm)
     vm->curParser = NULL;
     StringBufferInit(&vm->allMethodNames);
     vm->allModules = newObjMap(vm);
+
+    vm->config.heapGrowthFactor = 1.5;
+
+    // 最小堆大小为1MB
+    vm->config.minHeapSize = 1024 * 1024;
+    // 初始堆大小为10MB
+    vm->config.initialHeapSize = 1024 * 1024 * 10;
+
+    vm->config.nextGC = vm->config.initialHeapSize;
+
+    vm->grays.count = 0;
+    vm->grays.capacity = 32;
+
+    // 初始化指针数组grayObjects
+    vm->grays.grayObjects =
+        (ObjHeader **)malloc(vm->grays.capacity * sizeof(ObjHeader *));
 }
 
 VM *newVM()
