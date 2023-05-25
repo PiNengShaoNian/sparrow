@@ -80,5 +80,6 @@ int defineModuleVar(VM *vm, ObjModule *objModule, const char *name, uint32_t len
 ObjFn *compileModule(VM *vm, ObjModule *objModule, const char *moduleCode);
 uint32_t getBytesOfOperands(Byte *instrStream,
                             Value *constants, int ip);
+void grayCompileUnit(VM *vm, CompileUnit *cu);
 
 #endif // _COMPILER_COMPILER_H

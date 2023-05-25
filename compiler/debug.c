@@ -8,4 +8,6 @@
 void bindDebugFnName(UNUSED VM *vm, UNUSED FnDebug *fnDebug,
                      UNUSED const char *name, UNUSED uint32_t length) {}
 
+void dumpValue(UNUSED Value value) {}
+
 #endif // DEBUG

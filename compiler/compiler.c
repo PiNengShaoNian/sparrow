@@ -5,6 +5,7 @@
 #if DEBUG
 #include "debug.h"
 #endif
+#include "gc.h"
 
 struct compileUnit
 {
@@ -2607,4 +2608,22 @@ ObjFn *compileModule(VM *vm, ObjModule *objModule,
 #else
   return endCompileUnit(&moduleCU);
 #endif
+}
+
+// 标识compileUnit使用的所有堆分配的对象(及其所有父对象)可达,以使它们不被GC收集
+void grayCompileUnit(VM *vm, CompileUnit *cu)
+{
+  grayValue(vm, vm->curParser->curToken.value);
+  grayValue(vm, vm->curParser->preToken.value);
+
+  // 向上遍历父编译器外层链 使其fn可到达
+  // 编译结束后,vm->curParser会在endCompileUnit中置为NULL,
+  // 本函数是在编译过程中调用的,即vm->curParser肯定不为NULL,
+  ASSERT(vm->curParser != NULL, "only called while compiling!");
+
+  do
+  {
+    grayObject(vm, (ObjHeader *)cu->fn);
+    cu = cu->enclosingUnit;
+  } while (cu != NULL);
 }

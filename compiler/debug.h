@@ -8,5 +8,7 @@
 void bindDebugFnName(VM *vm, FnDebug *fnDebug,
                      const char *name, uint32_t length);
 
+void dumpValue(Value value);
+
 #endif
 #endif
