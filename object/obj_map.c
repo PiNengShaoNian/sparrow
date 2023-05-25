@@ -102,7 +102,7 @@ static void resizeMap(VM *vm, ObjMap *objMap, uint32_t newCapacity)
     while (idx < newCapacity)
     {
         newEntries[idx].key = VT_TO_VALUE(VT_UNDEFINED);
-        newEntries[idx].key = VT_TO_VALUE(VT_FALSE);
+        newEntries[idx].value = VT_TO_VALUE(VT_FALSE);
         idx++;
     }
 

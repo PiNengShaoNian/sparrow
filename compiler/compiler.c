@@ -1086,6 +1086,8 @@ static void condition(CompileUnit *cu, UNUSED bool canAssign)
   // 编译true分支
   expression(cu, BP_LOWEST);
 
+  consumeCurToken(cu->curParser, TOKEN_COLON, "expect ':' after true branch!");
+
   // 执行完true分支后需要跳过false分支
   uint32_t falseBranchEnd = emitInstrWithPlaceholder(cu, OPCODE_JUMP);
 

@@ -29,6 +29,7 @@ ObjClosure *newObjClosure(VM *vm, ObjFn *objFn)
 {
   ObjClosure *objClosure = ALLOCATE_EXTRA(vm, ObjClosure, sizeof(ObjUpvalue *) * objFn->upvalueNum);
   initObjHeader(vm, &objClosure->objHeader, OT_CLOSURE, vm->fnClass);
+  objClosure->fn = objFn;
 
   // 清除upvalue数组做 以避免在填充upvalue数组之前触发GC
   uint32_t idx = 0;

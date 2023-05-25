@@ -1978,6 +1978,17 @@ void buildCore(VM *vm)
   PRIM_METHOD_BIND(systemClass->objHeader.class, "importModule(_)", primSystemImportModule);
   PRIM_METHOD_BIND(systemClass->objHeader.class, "getModuleVariable(_,_)", primSystemGetModuleVariable);
   PRIM_METHOD_BIND(systemClass->objHeader.class, "writeString_(_)", primSystemWriteString);
+
+  // 在核心自举过程中创建了很多ObjString对象,创建过程中需要调用initObjHeader初始化对象头,
+  // 使其class指向vm->stringClass.但那时的vm->stringClass尚未初始化,因此现在更正.
+  ObjHeader *objHeader = vm->allObjects;
+  while (objHeader != NULL)
+  {
+    if (objHeader->type == OT_STRING)
+      objHeader->class = vm->stringClass;
+
+    objHeader = objHeader->next;
+  }
 }
 
 // table中查找符号symbol 找到后返回索引,否则返回-1
