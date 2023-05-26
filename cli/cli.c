@@ -5,8 +5,11 @@
 #include "vm.h"
 #include "core.h"
 
+int optionDumpInst = 0;
+
 // 执行脚本文件
-static void runFile(const char *path)
+static void
+runFile(const char *path)
 {
   const char *lastSlash = strrchr(path, '/');
   if (lastSlash != NULL)
@@ -53,6 +56,9 @@ int main(int argc, const char **argv)
   }
   else
   {
+    if (argc > 2 && memcmp(argv[2], "-i", 2) == 0)
+      optionDumpInst = 1;
+
     runFile(argv[1]);
   }
   return 0;

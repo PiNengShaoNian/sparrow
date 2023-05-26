@@ -14,6 +14,8 @@
 #include "core.script.inc"
 #include "unicodeUtf8.h"
 #include "gc.h"
+#include "cli.h"
+#include "debug.h"
 
 char *rootDir = NULL; // 根目录
 
@@ -125,6 +127,12 @@ static ObjThread *loadModule(VM *vm, Value moduleName, const char *moduleCode)
   }
 
   ObjFn *fn = compileModule(vm, module, moduleCode);
+
+#ifdef DEBUG
+  if (optionDumpInst)
+    dumpInstructions(vm, fn);
+#endif
+
   pushTmpRoot(vm, (ObjHeader *)fn);
   ObjClosure *objClosure = newObjClosure(vm, fn);
   pushTmpRoot(vm, (ObjHeader *)objClosure);
