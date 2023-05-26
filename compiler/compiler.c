@@ -240,6 +240,9 @@ int defineModuleVar(VM *vm, ObjModule *objModule, const char *name,
       MEM_ERROR("length of identifier \"%s\" should be no more than %d", id, MAX_ID_LEN);
   }
 
+  if (VALUE_IS_OBJ(value))
+    pushTmpRoot(vm, VALUE_TO_OBJ(value));
+
   // 从模块变量名中查找变量,若不存在就添加
   int symbolIndex = getIndexFromSymbolTable(&objModule->moduleVarName, name, length);
   if (symbolIndex == -1)
@@ -258,6 +261,9 @@ int defineModuleVar(VM *vm, ObjModule *objModule, const char *name,
   {
     symbolIndex = -1; // 已定义则返回-1,用于判断重定义
   }
+
+  if (VALUE_IS_OBJ(value))
+    popTmpRoot(vm);
 
   return symbolIndex;
 }
@@ -467,7 +473,14 @@ static void mixMethodSignature(CompileUnit *cu, Signature *sign)
 // 添加常量并返回其索引
 static uint32_t addConstant(CompileUnit *cu, Value constant)
 {
+  if (VALUE_IS_OBJ(constant))
+    pushTmpRoot(cu->curParser->vm, VALUE_TO_OBJ(constant));
+
   ValueBufferAdd(cu->curParser->vm, &cu->fn->constants, constant);
+
+  if (VALUE_IS_OBJ(constant))
+    popTmpRoot(cu->curParser->vm);
+
   return cu->fn->constants.count - 1;
 }
 

@@ -1,6 +1,7 @@
 #include "utils.h"
-#include "../vm/vm.h"
-#include "../parser/parser.h"
+#include "vm.h"
+#include "parser.h"
+#include "gc.h"
 #include <stdarg.h>
 
 // 内存管理3种功能
@@ -18,6 +19,10 @@ void *memManager(VM *vm, void *ptr, uint32_t oldSize, uint32_t newSize)
         free(ptr);
         return NULL;
     }
+
+    // 在分配内存时若达到了GC触发的阀值则启动垃圾回收
+    if (newSize > 0 && vm->allocatedBytes > vm->config.nextGC)
+        startGC(vm);
 
     return realloc(ptr, newSize);
 }

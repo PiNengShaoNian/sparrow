@@ -71,7 +71,7 @@ fun employeeInfo() {
       idx = idx + 1
    }
 
-   //System.gc()  //可以手动回收内存
+   System.gc()  //可以手动回收内存
 
    var a = 3 + 5 > 9 - 3  ? "yes" : "no"
    if (a.endsWith("s")) {

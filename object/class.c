@@ -59,7 +59,10 @@ Class *newRawClass(VM *vm, const char *name, uint32_t fieldNum)
   class->name = newObjString(vm, name, strlen(name));
   class->fieldNum = fieldNum;
   class->superClass = NULL; // 默认没有基类
+
+  pushTmpRoot(vm, (ObjHeader *)class);
   MethodBufferInit(&class->methods);
+  popTmpRoot(vm);
 
   return class;
 }
@@ -79,6 +82,7 @@ Class *newClass(VM *vm, ObjString *className, uint32_t fieldNum, Class *superCla
   Class *metaclass = newRawClass(vm, newClassName, fieldNum);
   metaclass->objHeader.class = vm->classOfClass;
 
+  pushTmpRoot(vm, (ObjHeader *)metaclass);
   // 绑定classOfClass为meta类的基类
   // 所有类的meta类的基类都是classOfClass
   bindSuperClass(vm, metaclass, vm->classOfClass);
@@ -87,9 +91,13 @@ Class *newClass(VM *vm, ObjString *className, uint32_t fieldNum, Class *superCla
   memcpy(newClassName, className->value.start, className->value.length);
   newClassName[className->value.length] = '\0';
   Class *class = newRawClass(vm, newClassName, fieldNum);
+  pushTmpRoot(vm, (ObjHeader *)class);
 
   class->objHeader.class = metaclass;
   bindSuperClass(vm, class, superClass);
+
+  popTmpRoot(vm); // metaclass
+  popTmpRoot(vm); // class
 
   return class;
 }

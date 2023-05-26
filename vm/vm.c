@@ -26,8 +26,6 @@ void initVM(VM *vm)
     vm->allocatedBytes = 0;
     vm->allObjects = NULL;
     vm->curParser = NULL;
-    StringBufferInit(&vm->allMethodNames);
-    vm->allModules = newObjMap(vm);
 
     vm->config.heapGrowthFactor = 1.5;
 
@@ -37,6 +35,9 @@ void initVM(VM *vm)
     vm->config.initialHeapSize = 1024 * 1024 * 10;
 
     vm->config.nextGC = vm->config.initialHeapSize;
+
+    StringBufferInit(&vm->allMethodNames);
+    vm->allModules = newObjMap(vm);
 
     vm->grays.count = 0;
     vm->grays.capacity = 32;
@@ -402,7 +403,8 @@ VMResult executeInstruction(VM *vm, register ObjThread *curThread)
             Class *class;
             Method *method;
 
-        CASE(CALL0) : case OPCODE_CALL1:
+        case OPCODE_CALL0:
+        case OPCODE_CALL1:
         case OPCODE_CALL2:
         case OPCODE_CALL3:
         case OPCODE_CALL4:

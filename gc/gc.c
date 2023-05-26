@@ -414,6 +414,9 @@ void startGC(VM *vm)
     // 置黑所有灰对象(保留的对象)
     blackObjectInGray(vm);
 
+    // 目前可达对象所占用的内存大小(下面freeObject的时候会调用memManager会减小这个值先暂存起来)
+    uint32_t newAllocatedBytes = vm->allocatedBytes;
+
     // 二 清扫阶段:回收白对象(垃圾对象)
 
     ObjHeader **obj = &vm->allObjects;
@@ -435,6 +438,8 @@ void startGC(VM *vm)
             obj = &(*obj)->next;
         }
     }
+
+    vm->allocatedBytes = newAllocatedBytes;
 
     // 更新下一次触发gc的阀值
     vm->config.nextGC = vm->allocatedBytes * vm->config.heapGrowthFactor;

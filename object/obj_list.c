@@ -24,9 +24,15 @@ void insertElement(VM *vm, ObjList *objList, uint32_t index, Value value)
   if (index > objList->elements.count - 1)
     RUN_ERROR("index out bounded!");
 
+  if (VALUE_IS_OBJ(value))
+    pushTmpRoot(vm, VALUE_TO_OBJ(value));
+
   // 准备一个Value的空间以容纳新元素产生的空间波动
   // 即最后一个元素要后移1个空间
   ValueBufferAdd(vm, &objList->elements, VT_TO_VALUE(VT_NULL));
+
+  if (VALUE_IS_OBJ(value))
+    popTmpRoot(vm);
 
   // 下面使index后面的元素整体后移一位
   uint32_t idx = objList->elements.count - 1;
@@ -55,6 +61,9 @@ Value removeElement(VM *vm, ObjList *objList, uint32_t index)
 {
   Value valueRemoved = objList->elements.datas[index];
 
+  if (VALUE_IS_OBJ(valueRemoved))
+    pushTmpRoot(vm, VALUE_TO_OBJ(valueRemoved));
+
   // 使index后面的元素前移一位,覆盖index处的元素
   uint32_t idx = index;
   while (idx < objList->elements.count)
@@ -69,6 +78,9 @@ Value removeElement(VM *vm, ObjList *objList, uint32_t index)
   {
     shrinkList(vm, objList, _capacity);
   }
+
+  if (VALUE_IS_OBJ(valueRemoved))
+    popTmpRoot(vm);
 
   objList->elements.count--;
   return valueRemoved;

@@ -13,6 +13,7 @@
 #include "compiler.h"
 #include "core.script.inc"
 #include "unicodeUtf8.h"
+#include "gc.h"
 
 char *rootDir = NULL; // 根目录
 
@@ -105,7 +106,10 @@ static ObjThread *loadModule(VM *vm, Value moduleName, const char *moduleCode)
     ASSERT(modName->value.start[modName->value.length] == '\0', "string.value.start is not terminated!");
 
     module = newObjModule(vm, modName->value.start);
+
+    pushTmpRoot(vm, (ObjHeader *)module);
     mapSet(vm, vm->allModules, moduleName, OBJ_TO_VALUE(module));
+    popTmpRoot(vm);
 
     // 继承核心模块中的变量
     ObjModule *coreModule = getModule(vm, CORE_MODULE);
@@ -121,8 +125,12 @@ static ObjThread *loadModule(VM *vm, Value moduleName, const char *moduleCode)
   }
 
   ObjFn *fn = compileModule(vm, module, moduleCode);
+  pushTmpRoot(vm, (ObjHeader *)fn);
   ObjClosure *objClosure = newObjClosure(vm, fn);
+  pushTmpRoot(vm, (ObjHeader *)objClosure);
   ObjThread *moduleThread = newObjThread(vm, objClosure);
+  popTmpRoot(vm); // objClosure
+  popTmpRoot(vm); // fn
 
   return moduleThread;
 }
@@ -1297,6 +1305,12 @@ static bool primListCount(UNUSED VM *vm, Value *args)
   RET_NUM(VALUE_TO_OBJLIST(args[0])->elements.count);
 }
 
+// objList.capacity:返回list的capacity
+static bool primListCapacity(UNUSED VM *vm, Value *args)
+{
+  RET_NUM(VALUE_TO_OBJLIST(args[0])->elements.capacity);
+}
+
 // objList.insert(_,_):插入元素
 static bool primListInsert(VM *vm, Value *args)
 {
@@ -1627,6 +1641,22 @@ static bool primSystemClock(UNUSED VM *vm, UNUSED Value *args)
   RET_NUM((double)time(NULL));
 }
 
+// System.gc(): 启动gc
+static bool primSystemGC(VM *vm, Value *args)
+{
+  startGC(vm);
+  RET_NULL;
+}
+
+static bool primSystemPrintHeapInfo(VM *vm, Value *args)
+{
+  printf("============== HEAP_INFO START =================\n");
+  printf("allocatedBytes: %u\n", vm->allocatedBytes);
+  printf("nextGC: %u\n", vm->config.nextGC);
+  printf("============== HEAP_INFO END =================\n");
+  RET_NULL;
+}
+
 // System.importModule(_): 导入并编译模块args[1],把模块挂载到vm->allModules
 static bool primSystemImportModule(VM *vm, Value *args)
 {
@@ -1782,7 +1812,9 @@ void buildCore(VM *vm)
 {
   // 创建核心模块,录入到vm->allModules
   ObjModule *coreModule = newObjModule(vm, NULL); // NULL为核心模块.name
+  pushTmpRoot(vm, (ObjHeader *)coreModule);
   mapSet(vm, vm->allModules, CORE_MODULE, OBJ_TO_VALUE(coreModule));
+  popTmpRoot(vm);
 
   // 创建object类并绑定方法
   vm->objectClass = defineClass(vm, coreModule, "object");
@@ -1944,6 +1976,7 @@ void buildCore(VM *vm)
   PRIM_METHOD_BIND(vm->listClass, "addCore_(_)", primListAddCore);
   PRIM_METHOD_BIND(vm->listClass, "clear()", primListClear);
   PRIM_METHOD_BIND(vm->listClass, "count", primListCount);
+  PRIM_METHOD_BIND(vm->listClass, "capacity", primListCapacity);
   PRIM_METHOD_BIND(vm->listClass, "insert(_,_)", primListInsert);
   PRIM_METHOD_BIND(vm->listClass, "iterate(_)", primListIterate);
   PRIM_METHOD_BIND(vm->listClass, "iteratorValue(_)", primListIteratorValue);
@@ -1975,6 +2008,8 @@ void buildCore(VM *vm)
   // system类
   Class *systemClass = VALUE_TO_CLASS(getCoreClassValue(coreModule, "System"));
   PRIM_METHOD_BIND(systemClass->objHeader.class, "clock", primSystemClock);
+  PRIM_METHOD_BIND(systemClass->objHeader.class, "gc()", primSystemGC);
+  PRIM_METHOD_BIND(systemClass->objHeader.class, "printHeapInfo()", primSystemPrintHeapInfo);
   PRIM_METHOD_BIND(systemClass->objHeader.class, "importModule(_)", primSystemImportModule);
   PRIM_METHOD_BIND(systemClass->objHeader.class, "getModuleVariable(_,_)", primSystemGetModuleVariable);
   PRIM_METHOD_BIND(systemClass->objHeader.class, "writeString_(_)", primSystemWriteString);
