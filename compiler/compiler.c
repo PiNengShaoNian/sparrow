@@ -6,6 +6,7 @@
 #include "debug.h"
 #endif
 #include "gc.h"
+#include "cli.h"
 
 struct compileUnit
 {
@@ -574,7 +575,7 @@ static void enterScope(CompileUnit *cu)
 static void leaveScope(CompileUnit *cu)
 {
   // 对于非模块编译单元,丢弃局部变量
-  if (cu->enclosingUnit != NULL)
+  if (cu->enclosingUnit != NULL || cu->curLoop != NULL)
   {
     // 出作用域后丢弃本作用域以内的局部变量
     uint32_t discardNum = discardLocalVar(cu, cu->scopeDepth);
@@ -962,6 +963,11 @@ static ObjFn *endCompileUnit(CompileUnit *cu)
       index++;
     }
   }
+
+#ifdef DEBUG
+  if (optionDumpInst)
+    dumpInstructions(cu->curParser->vm, cu->fn);
+#endif
 
   /// 下掉本编译单元,使当前编译单元指向外层编译单元
   cu->curParser->curCompileUnit = cu->enclosingUnit;
