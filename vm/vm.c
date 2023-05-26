@@ -4,6 +4,7 @@
 #include "utils.h"
 #include "core.h"
 #include "compiler.h"
+#include "gc.h"
 
 // 把obj做为临时的根对象,就是把obj添加为gc的白名单,避免被gc回收
 void pushTmpRoot(VM *vm, ObjHeader *obj)
@@ -56,6 +57,26 @@ VM *newVM()
     initVM(vm);
     buildCore(vm);
     return vm;
+}
+
+// 释放虚拟机vm
+void freeVM(VM *vm)
+{
+    ASSERT(vm->allMethodNames.count > 0, "VM have already been freed!");
+
+    // 释放所有的对象
+    ObjHeader *objHeader = vm->allObjects;
+    while (objHeader != NULL)
+    {
+        // 释放之前先备份下一个结点地址
+        ObjHeader *next = objHeader->next;
+        freeObject(vm, objHeader);
+        objHeader = next;
+    }
+
+    vm->grays.grayObjects = DEALLOCATE(vm, vm->grays.grayObjects);
+    StringBufferClear(vm, &vm->allMethodNames);
+    DEALLOCATE(vm, vm);
 }
 
 // 确保stack有效

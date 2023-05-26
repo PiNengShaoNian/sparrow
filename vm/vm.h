@@ -91,4 +91,6 @@ void pushTmpRoot(VM *vm, ObjHeader *obj);
 
 void popTmpRoot(VM *vm);
 
+void freeVM(VM *vm);
+
 #endif // _VM_VM_H
