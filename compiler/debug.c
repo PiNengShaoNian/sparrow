@@ -354,6 +354,9 @@ static int dumpOneInstruction(VM *vm, ObjFn *fn, int i, int *lastLine)
 // 打印指令
 void dumpInstructions(VM *vm, ObjFn *fn)
 {
+  if (fn->module->name == NULL)
+    return;
+
   printf("module:[%s]\tfunction:[%s]\n",
          fn->module->name == NULL ? "<core>" : fn->module->name->value.start,
          fn->debug->fnName);

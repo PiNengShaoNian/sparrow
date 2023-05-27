@@ -5,6 +5,10 @@
 #include "core.h"
 #include "compiler.h"
 #include "gc.h"
+#include "cli.h"
+#ifdef DEBUG
+#include "debug.h"
+#endif
 
 // 把obj做为临时的根对象,就是把obj添加为gc的白名单,避免被gc回收
 void pushTmpRoot(VM *vm, ObjHeader *obj)
@@ -327,6 +331,11 @@ static void bindMethodAndPatch(VM *vm, OpCode opCode,
     // 修正操作数
     patchOperand(class, method.obj->fn);
 
+#ifdef DEBUG
+    if (optionDumpInst)
+        dumpInstructions(vm, method.obj->fn);
+#endif
+
     // 修正过后,绑定method到class
     bindMethod(vm, class, methodIndex, method);
 }
@@ -454,7 +463,8 @@ VMResult executeInstruction(VM *vm, register ObjThread *curThread)
             // 获得方法所在的类
             class = getClassOfObj(vm, args[0]);
             goto invokeMethod;
-        CASE(SUPER0) : case OPCODE_SUPER1:
+        case OPCODE_SUPER0:
+        case OPCODE_SUPER1:
         case OPCODE_SUPER2:
         case OPCODE_SUPER3:
         case OPCODE_SUPER4:
@@ -482,7 +492,7 @@ VMResult executeInstruction(VM *vm, register ObjThread *curThread)
             class = VALUE_TO_CLASS(fn->constants.datas[READ_SHORT()]);
 
         invokeMethod:
-            if ((uint32_t)index > class->methods.count || (method = &class->methods.datas[index])->type == MT_NONE)
+            if ((uint32_t)index >= class->methods.count || (method = &class->methods.datas[index])->type == MT_NONE)
                 RUN_ERROR("method \"%s\" not found!", vm->allMethodNames.datas[index].str);
 
             switch (method->type)

@@ -121,6 +121,9 @@ static void emitMethodCall(CompileUnit *cu, const char *name,
                            uint32_t length, OpCode opCode, bool canAssign);
 static void unaryOperator(CompileUnit *cu, UNUSED bool canAssign);
 static void compileStatement(CompileUnit *cu);
+static int declareMethod(CompileUnit *cu, char *signStr, uint32_t length);
+static void defineMethod(CompileUnit *cu,
+                         Variable classVar, bool isStatic, int methodIndex);
 
 // 初始化CompileUnit
 static void initCompileUnit(Parser *parser, CompileUnit *cu,
@@ -495,7 +498,6 @@ static void emitLoadConstant(CompileUnit *cu, Value value)
 //'.'.led() 编译方法调用,所有调用的入口
 static void callEntry(CompileUnit *cu, bool canAssign)
 {
-  // 本函数是'.'.led(),curToken是TOKEN_ID
   // 本函数是'.'.led(),curToken是TOKEN_ID
   consumeCurToken(cu->curParser,
                   TOKEN_ID, "expect method name after '.'!");
@@ -963,11 +965,6 @@ static ObjFn *endCompileUnit(CompileUnit *cu)
       index++;
     }
   }
-
-#ifdef DEBUG
-  if (optionDumpInst)
-    dumpInstructions(cu->curParser->vm, cu->fn);
-#endif
 
   /// 下掉本编译单元,使当前编译单元指向外层编译单元
   cu->curParser->curCompileUnit = cu->enclosingUnit;
@@ -1678,8 +1675,70 @@ static void unaryOperator(CompileUnit *cu, UNUSED bool canAssign)
   emitCall(cu, 0, rule->id, 1);
 }
 
+static void defineFieldDefaultGetter(CompileUnit *cu, Variable classVar, int fieldIndex)
+{
+  // 在sparrow中所有的字段的访问都会被转换为对字段同名getter的调用，为了在外边能够访问
+  // 字段我们会给每一个字段一个默认的getter
+  // 生成getter的编译单元
+  Token name = cu->curParser->preToken;
+  CompileUnit getterCU;
+  initCompileUnit(cu->curParser, &getterCU, cu, false);
+
+  Signature getterSign = {SIGN_GETTER, name.start, name.length, 0}; // 临时用于编译函数
+  char signatureString[MAX_SIGN_LEN] = {'\0'};
+  uint32_t signLen = sign2String(&getterSign, signatureString);
+
+  // 将方法声明
+  uint32_t methodIndex = declareMethod(cu, signatureString, signLen);
+
+  writeOpCodeByteOperand(&getterCU, OPCODE_LOAD_THIS_FIELD, fieldIndex); // 载入该字段到栈中
+  writeOpCode(&getterCU, OPCODE_RETURN);                                 // 将上面栈顶的值返回
+
+#if DEBUG
+  endCompileUnit(&getterCU, signatureString, signLen);
+#else
+  endCompileUnit(&getterCU);
+#endif
+
+  // 定义方法:将上面创建的方法闭包绑定到类
+  defineMethod(cu, classVar, cu->enclosingClassBK->inStatic, methodIndex);
+}
+
+static void defineFieldDefaultSetter(CompileUnit *cu, Variable classVar, int fieldIndex)
+{
+  // 在sparrow中所有的字段的赋值都会被转换为对字段同名setter的调用，为了在外边能够访问
+  // 字段我们会给每一个字段一个默认的setter
+  // 生成setter的编译单元
+  Token name = cu->curParser->preToken;
+  CompileUnit setterCU;
+  initCompileUnit(cu->curParser, &setterCU, cu, false);
+
+  Signature getterSign = {SIGN_SETTER, name.start, name.length, 1}; // 临时用于编译函数
+  char signatureString[MAX_SIGN_LEN] = {'\0'};
+  uint32_t signLen = sign2String(&getterSign, signatureString);
+
+  // 将方法声明
+  uint32_t methodIndex = declareMethod(cu, signatureString, signLen);
+
+  writeOpCodeByteOperand(&setterCU, OPCODE_LOAD_LOCAL_VAR, 1); // 加载第一个参数到栈中
+  writeOpCodeByteOperand(&setterCU, OPCODE_STORE_THIS_FIELD,
+                         fieldIndex); // 将参数赋值到字段中
+  writeOpCode(&setterCU, OPCODE_POP); // 弹出参数
+  writeOpCode(&setterCU, OPCODE_PUSH_NULL);
+  writeOpCode(&setterCU, OPCODE_RETURN); // 将上面栈顶的值返回
+
+#if DEBUG
+  endCompileUnit(&setterCU, signatureString, signLen);
+#else
+  endCompileUnit(&setterCU);
+#endif
+
+  // 定义方法:将上面创建的方法闭包绑定到类
+  defineMethod(cu, classVar, cu->enclosingClassBK->inStatic, methodIndex);
+}
+
 // 编译变量定义
-static void compileVarDefinition(CompileUnit *cu, bool isStatic)
+static void compileVarDefinition(CompileUnit *cu, Variable classVar, bool isStatic)
 {
   consumeCurToken(cu->curParser, TOKEN_ID, "missing variable name!");
   Token name = cu->curParser->preToken;
@@ -1738,6 +1797,9 @@ static void compileVarDefinition(CompileUnit *cu, bool isStatic)
       {
         fieldIndex = addSymbol(cu->curParser->vm,
                                &classBK->fields, name.start, name.length);
+
+        defineFieldDefaultGetter(cu, classVar, fieldIndex);
+        defineFieldDefaultSetter(cu, classVar, fieldIndex);
       }
       else
       {
@@ -2176,16 +2238,16 @@ static int declareMethod(CompileUnit *cu, char *signStr, uint32_t length)
   IntBuffer *methods = cu->enclosingClassBK->inStatic ? &cu->enclosingClassBK->staticMethods
                                                       : &cu->enclosingClassBK->instantMethods;
 
-  uint32_t idx = 0;
-  while (idx < methods->count)
-  {
-    if (methods->datas[idx] == index)
-    {
-      COMPILE_ERROR(cu->curParser, "repeat define method %s in class %s!",
-                    signStr, cu->enclosingClassBK->name->value.start);
-    }
-    idx++;
-  }
+  // uint32_t idx = 0;
+  // while (idx < methods->count)
+  // {
+  //   if (methods->datas[idx] == index)
+  //   {
+  //     COMPILE_ERROR(cu->curParser, "repeat define method %s in class %s!",
+  //                   signStr, cu->enclosingClassBK->name->value.start);
+  //   }
+  //   idx++;
+  // }
 
   // 若是新定义就加入,这里并不是注册新方法,
   // 而是用索引来记录已经定义过的方法,用于以后排重
@@ -2308,12 +2370,12 @@ static void compileClassBody(CompileUnit *cu, Variable classVar)
   if (matchToken(cu->curParser, TOKEN_STATIC))
   {
     if (matchToken(cu->curParser, TOKEN_VAR)) // 处理静态域 "static var id"
-      compileVarDefinition(cu, true);
+      compileVarDefinition(cu, classVar, true);
     else
       compileMethod(cu, classVar, true);
   }
   else if (matchToken(cu->curParser, TOKEN_VAR)) // 实例域
-    compileVarDefinition(cu, false);
+    compileVarDefinition(cu, classVar, false);
   else // 类的方法
     compileMethod(cu, classVar, false);
 }
@@ -2549,7 +2611,7 @@ static void compileProgram(CompileUnit *cu)
   else if (matchToken(cu->curParser, TOKEN_FUN))
     compileFunctionDefinition(cu);
   else if (matchToken(cu->curParser, TOKEN_VAR))
-    compileVarDefinition(cu, cu->curParser->preToken.type == TOKEN_STATIC);
+    compileVarDefinition(cu, (Variable){0}, cu->curParser->preToken.type == TOKEN_STATIC);
   else if (matchToken(cu->curParser, TOKEN_IMPORT))
     compileImport(cu);
   else
