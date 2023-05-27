@@ -1388,10 +1388,8 @@ static void id(CompileUnit *cu, bool canAssign)
   {
     char id[MAX_ID_LEN] = {'\0'};
 
-    // 函数名加上"Fn "前缀做为模块变量名,
     // 检查前面是否已有此函数的定义
-    memmove(id, "Fn ", 3);
-    memmove(id + 3, name.start, name.length);
+    memmove(id, name.start, name.length);
 
     Variable var;
     var.scopeType = VAR_SCOPE_MODULE;
@@ -1518,12 +1516,8 @@ static void id(CompileUnit *cu, bool canAssign)
     {
       // 模块变量属于模块作用域,若当前引用处之前未定义该模块变量,
       // 说不定在后面有其定义,因此暂时先声明它,待模块统计完后再检查
-
-      // 用关键字'fun'定义的函数是以前缀"Fn "后接"函数名"做为模块变量
-      // 下面加上"Fn "前缀按照函数名重新查找
       char fnName[MAX_SIGN_LEN + 4] = {'\0'};
-      memmove(fnName, "Fn ", 3);
-      memmove(fnName + 3, name.start, name.length);
+      memmove(fnName, name.start, name.length);
       var.index = getIndexFromSymbolTable(
           &cu->curParser->curModule->moduleVarName, fnName, strlen(fnName));
 
@@ -2427,10 +2421,8 @@ static void compileFunctionDefinition(CompileUnit *cu)
 
   consumeCurToken(cu->curParser, TOKEN_ID, "missing function name!");
 
-  // 函数名加上"Fn "前缀做为模块变量存储
-  char fnName[MAX_SIGN_LEN + 4] = {'\0'}; //"fn xxx\0"
-  memmove(fnName, "Fn ", 3);              // 把函数名加上"Fn "前缀后做为变量名
-  memmove(fnName + 3, cu->curParser->preToken.start,
+  char fnName[MAX_SIGN_LEN + 4] = {'\0'}; //"xxx\0"
+  memmove(fnName, cu->curParser->preToken.start,
           cu->curParser->preToken.length);
 
   uint32_t fnNameIndex = declareVariable(cu, fnName, strlen(fnName));
