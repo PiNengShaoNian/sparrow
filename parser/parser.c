@@ -383,7 +383,12 @@ void getNextToken(Parser *parser)
       parser->curToken.type = TOKEN_RIGHT_BRACE;
       break;
     case '.':
-      if (matchNextChar(parser, '.'))
+      if (isdigit(lookAheadChar(parser)))
+      {
+        parseNum(parser);
+        return;
+      }
+      else if (matchNextChar(parser, '.'))
         parser->curToken.type = TOKEN_DOT_DOT;
       else
         parser->curToken.type = TOKEN_DOT;
