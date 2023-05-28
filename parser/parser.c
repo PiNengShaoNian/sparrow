@@ -216,10 +216,10 @@ static void parseString(Parser *parser)
       break;
     }
 
-    if (parser->curChar == '%')
+    if (parser->curChar == '%' && lookAheadChar(parser) == '(')
     {
       if (!matchNextChar(parser, '('))
-        LEX_ERROR(parser, "'%' should followed by '('!");
+        LEX_ERROR(parser, "'%%' should followed by '('!");
 
       if (parser->interpolationExpectRightParenNum > 0)
         COMPILE_ERROR(parser, "sorry, I don`t support nest interpolate expression!");
@@ -260,6 +260,9 @@ static void parseString(Parser *parser)
         break;
       case '"':
         ByteBufferAdd(parser->vm, &str, '"');
+        break;
+      case '%':
+        ByteBufferAdd(parser->vm, &str, '%');
         break;
       case '\\':
         ByteBufferAdd(parser->vm, &str, '\\');
