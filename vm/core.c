@@ -631,6 +631,9 @@ static bool primThreadAbort(VM *vm, Value *args)
 {
   // 此函数后续未处理,暂时放着
   vm->curThread->errorObj = args[1]; // 保存退出参数
+  if (!VALUE_IS_NULL(args[1]))
+    vm->curThread = NULL;
+
   return VALUE_IS_NULL(args[1]);
 }
 

@@ -381,6 +381,10 @@ VMResult executeInstruction(VM *vm, register ObjThread *curThread)
 
 #define CASE(shortOpCode) case OPCODE_##shortOpCode
 #define LOOP() goto loopStart
+#define INSTR_LINENO \
+    (curFrame->closure->fn->debug->lineNo.datas[ip - curFrame->closure->fn->instrStream.datas - 1])
+#define INSTR_FN_NAME \
+    (curFrame->closure->fn->debug->fnName)
 
     LOAD_CUR_FRAME();
     DECODE
@@ -493,7 +497,11 @@ VMResult executeInstruction(VM *vm, register ObjThread *curThread)
 
         invokeMethod:
             if ((uint32_t)index >= class->methods.count || (method = &class->methods.datas[index])->type == MT_NONE)
+#ifndef DEBUG
                 RUN_ERROR("method \"%s\" not found!", vm->allMethodNames.datas[index].str);
+#else
+                RUN_ERROR("(%s) line %d: method \"%s\" not found!", INSTR_FN_NAME, INSTR_LINENO, vm->allMethodNames.datas[index].str);
+#endif
 
             switch (method->type)
             {
@@ -518,7 +526,12 @@ VMResult executeInstruction(VM *vm, register ObjThread *curThread)
                         if (VALUE_IS_OBJSTR(curThread->errorObj))
                         {
                             ObjString *err = VALUE_TO_OBJSTR(curThread->errorObj);
-                            printf("%s", err->value.start);
+#ifndef DEBUG
+                            printf("%s\n", err->value.start);
+#else
+                            printf("(%s) line %d: %s\n", INSTR_FN_NAME, INSTR_LINENO, err->value.start);
+#endif
+                            fflush(stdout);
                         }
 
                         // 出错后将返回值置为null,避免主调方获取到错误的结果
