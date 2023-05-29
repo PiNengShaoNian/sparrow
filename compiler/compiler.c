@@ -543,13 +543,18 @@ static uint32_t discardLocalVar(CompileUnit *cu, int scopeDepth)
 {
   ASSERT(cu->scopeDepth > -1, "upmost scope can`t exit!");
 
-  int localIdx = cu->localVarNum - 1;
+  uint32_t discardVarNum = 0;
 
-  // 变量作用域大于scodeDepth的为其内嵌作用域中的变量,
-  // 跳出scodeDepth时内层也没用了,要回收其局部变量.
-  while (localIdx >= 0 && cu->localVars[localIdx].scopeDepth >= scopeDepth)
+  // 变量作用域大于scopeDepth的为其内嵌作用域中的变量,
+  // 跳出scopeDepth时内层也没用了,要回收其局部变量.
+  for (int localIdx = cu->localVarNum - 1;
+       localIdx >= 0 &&
+       cu->localVars[localIdx].scopeDepth >= scopeDepth;
+       localIdx--)
   {
-    if (cu->localVars[localIdx].isUpvalue)
+    LocalVar *var = &cu->localVars[localIdx];
+
+    if ((cu->enclosingUnit != NULL || cu->curLoop != NULL) && var->isUpvalue)
     {
       // 如果此局量是其内层的upvalue就将其关闭
       writeByte(cu, OPCODE_CLOSE_UPVALUE);
@@ -559,11 +564,11 @@ static uint32_t discardLocalVar(CompileUnit *cu, int scopeDepth)
       // 否则就弹出该变量回收空间
       writeByte(cu, OPCODE_POP);
     }
-    localIdx--;
+    discardVarNum++;
   }
 
   // 返回丢掉的局部变量个数
-  return cu->localVarNum - 1 - localIdx;
+  return discardVarNum;
 }
 
 // 进入新作用域
@@ -576,14 +581,10 @@ static void enterScope(CompileUnit *cu)
 // 退出作用域
 static void leaveScope(CompileUnit *cu)
 {
-  // 对于非模块编译单元,丢弃局部变量
-  if (cu->enclosingUnit != NULL || cu->curLoop != NULL)
-  {
-    // 出作用域后丢弃本作用域以内的局部变量
-    uint32_t discardNum = discardLocalVar(cu, cu->scopeDepth);
-    cu->localVarNum -= discardNum;
-    cu->stackSlotNum -= discardNum;
-  }
+  // 出作用域后丢弃本作用域以内的局部变量
+  uint32_t discardNum = discardLocalVar(cu, cu->scopeDepth);
+  cu->localVarNum -= discardNum;
+  cu->stackSlotNum -= discardNum;
 
   // 回到上一层作用域
   cu->scopeDepth--;

@@ -4,6 +4,7 @@
 #include "obj_range.h"
 #include "parser.h"
 #if DEBUG
+#include "cli.h"
 #include "debug.h"
 #include <time.h>
 #endif
@@ -252,9 +253,12 @@ static void blackUpvalue(VM *vm, ObjUpvalue *objUpvalue)
 static void blackObject(VM *vm, ObjHeader *obj)
 {
 #ifdef DEBUG
-    printf("mark ");
-    dumpValue(OBJ_TO_VALUE(obj));
-    printf(" @ %p\n", obj);
+    if (optionDumpGCInfo)
+    {
+        printf("mark ");
+        dumpValue(OBJ_TO_VALUE(obj));
+        printf(" @ %p\n", obj);
+    }
 #endif
 
     // 根据对象类型分别标黑
@@ -322,9 +326,12 @@ static void blackObjectInGray(VM *vm)
 void freeObject(VM *vm, ObjHeader *obj)
 {
 #ifdef DEBUG
-    printf("free ");
-    dumpValue(OBJ_TO_VALUE(obj));
-    printf(" @ %p\n", obj);
+    if (optionDumpGCInfo)
+    {
+        printf("free ");
+        dumpValue(OBJ_TO_VALUE(obj));
+        printf(" @ %p\n", obj);
+    }
 #endif
 
     // 根据对象类型分别处理
@@ -380,8 +387,11 @@ void startGC(VM *vm)
 #ifdef DEBUG
     double startTime = (double)clock() / CLOCKS_PER_SEC;
     uint32_t before = vm->allocatedBytes;
-    printf("-- gc  before:%d   nextGC:%d  vm:%p  --\n",
-           before, vm->config.nextGC, vm);
+    if (optionDumpGCInfo)
+    {
+        printf("-- gc  before:%d   nextGC:%d  vm:%p  --\n",
+               before, vm->config.nextGC, vm);
+    }
 #endif
 
     // 一 标记阶段:标记需要保留的对象
@@ -447,12 +457,15 @@ void startGC(VM *vm)
         vm->config.nextGC = vm->config.minHeapSize;
 
 #ifdef DEBUG
-    double elapsed = ((double)clock() / CLOCKS_PER_SEC) - startTime;
-    printf("GC %lu before, %lu after (%lu collected), next at %lu. take %.3fs.\n",
-           (unsigned long)before,
-           (unsigned long)vm->allocatedBytes,
-           (unsigned long)(before - vm->allocatedBytes),
-           (unsigned long)vm->config.nextGC,
-           elapsed);
+    if (optionDumpGCInfo)
+    {
+        double elapsed = ((double)clock() / CLOCKS_PER_SEC) - startTime;
+        printf("GC %lu before, %lu after (%lu collected), next at %lu. take %.3fs.\n",
+               (unsigned long)before,
+               (unsigned long)vm->allocatedBytes,
+               (unsigned long)(before - vm->allocatedBytes),
+               (unsigned long)vm->config.nextGC,
+               elapsed);
+    }
 #endif
 }

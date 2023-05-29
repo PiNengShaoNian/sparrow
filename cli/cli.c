@@ -6,6 +6,7 @@
 #include "core.h"
 
 int optionDumpInst = 0;
+int optionDumpGCInfo = 0;
 
 // 执行脚本文件
 static void runFile(const char *path)
@@ -55,8 +56,13 @@ int main(int argc, const char **argv)
   }
   else
   {
-    if (argc > 2 && memcmp(argv[2], "-i", 2) == 0)
-      optionDumpInst = 1;
+    for (int i = 2; i < argc; i++)
+    {
+      if (memcmp(argv[i], "-i", 2) == 0)
+        optionDumpInst = 1;
+      else if (memcmp(argv[i], "-g", 2) == 0)
+        optionDumpGCInfo = 1;
+    }
 
     runFile(argv[1]);
   }

@@ -6,4 +6,6 @@
 
 extern int optionDumpInst;
 
+extern int optionDumpGCInfo;
+
 #endif // _CLI_CLI_H
