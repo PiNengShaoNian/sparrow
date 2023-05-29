@@ -746,7 +746,7 @@ static int addUpvalue(CompileUnit *cu, bool isEnclosingLocalVar, uint32_t index)
     if (cu->upvalues[idx].index == index && cu->upvalues[idx].isEnclosingLocalVar == isEnclosingLocalVar)
       return idx;
 
-    index++;
+    idx++;
   }
 
   // 若没找到则将其添加
@@ -1380,7 +1380,7 @@ static void id(CompileUnit *cu, bool canAssign)
   // 标识符可以是任意符号,按照此顺序处理:
   // 函数调用->局部变量和upvalue->实例域->静态域->类getter方法调用->模块变量
 
-  // 处理函数调用
+  // 处理全局作用域的函数调用(需要单独处理,在全局作用域中不允许先调用后定义)
   if (cu->enclosingUnit == NULL && matchToken(cu->curParser, TOKEN_LEFT_PAREN))
   {
     char id[MAX_ID_LEN] = {'\0'};
@@ -1430,7 +1430,16 @@ static void id(CompileUnit *cu, bool canAssign)
     Variable var = getVarFromLocalOrUpvalue(cu, name.start, name.length);
     if (var.index != -1)
     {
-      emitLoadOrStoreVariable(cu, canAssign, var);
+      if (cu->curParser->curToken.type == TOKEN_LEFT_PAREN)
+      {
+        emitLoadVariable(cu, var); // 为var生成读取指令
+        emitMethodCall(cu, "call", 4, OPCODE_CALL0, false);
+      }
+      else
+      {
+        emitLoadOrStoreVariable(cu, canAssign, var);
+      }
+
       return;
     }
 
@@ -1526,6 +1535,14 @@ static void id(CompileUnit *cu, bool canAssign)
                                      name.start, name.length, NUM_TO_VALUE(cu->curParser->curToken.lineNo));
       }
     }
+
+    if (cu->curParser->curToken.type == TOKEN_LEFT_PAREN)
+    {
+      emitLoadVariable(cu, var);
+      emitMethodCall(cu, "call", 4, OPCODE_CALL0, false);
+      return;
+    }
+
     emitLoadOrStoreVariable(cu, canAssign, var);
   }
 }
@@ -2517,6 +2534,11 @@ static void compileFunctionDefinition(CompileUnit *cu)
   endCompileUnit(&fnCU, fnName, strlen(fnName));
 #else
   endCompileUnit(&fnCU);
+#endif
+
+#ifdef DEBUG
+  if (optionDumpInst)
+    dumpInstructions(cu->curParser->vm, fnCU.fn);
 #endif
 
   // 将栈顶的闭包写入变量

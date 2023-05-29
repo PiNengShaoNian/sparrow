@@ -8,8 +8,7 @@
 int optionDumpInst = 0;
 
 // 执行脚本文件
-static void
-runFile(const char *path)
+static void runFile(const char *path)
 {
   const char *lastSlash = strrchr(path, '/');
   if (lastSlash != NULL)
