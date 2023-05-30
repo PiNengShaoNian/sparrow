@@ -110,6 +110,13 @@ static void parseHexNum(Parser *parser)
     getNextChar(parser);
 }
 
+// 解析二进制数字
+static void parseBinNum(Parser *parser)
+{
+  while (parser->curChar == '0' || parser->curChar == '1')
+    getNextChar(parser);
+}
+
 // 解析十进制数字
 static void parseDecNum(Parser *parser)
 {
@@ -142,6 +149,13 @@ static void parseNum(Parser *parser)
     parseHexNum(parser); // 解析十六进制数字
     parser->curToken.value =
         NUM_TO_VALUE(strtol(parser->curToken.start, NULL, 16));
+  }
+  else if (parser->curChar == '0' && matchNextChar(parser, 'b'))
+  {
+    getNextChar(parser); // 跳过'b'
+    parseBinNum(parser); // 解析二进制数字
+    parser->curToken.value =
+        NUM_TO_VALUE(strtol(parser->curToken.start + 2, NULL, 2));
   }
   else if (parser->curChar == '0' && isdigit(lookAheadChar(parser)))
   {
