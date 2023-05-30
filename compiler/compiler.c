@@ -1877,26 +1877,59 @@ static void compileIfStatement(CompileUnit *cu)
   // 代码块前后的'{'和'}'由compileStatement负责读取
   compileStatement(cu);
 
-  // 如果有else分支
-  if (matchToken(cu->curParser, TOKEN_ELSE))
+  IntBuffer jmpToEnds;
+  IntBufferInit(&jmpToEnds);
+
+  while (true)
   {
-    // 添加跳过else分支的跳转指令
-    uint32_t falseBranchEnd = emitInstrWithPlaceholder(cu, OPCODE_JUMP);
+    // 如果有else分支
+    if (matchToken(cu->curParser, TOKEN_ELSE))
+    {
+      if (matchToken(cu->curParser, TOKEN_IF)) // else if编译
+      {
+        // 添加跳过else分支的跳转指令
+        uint32_t falseBranchEnd = emitInstrWithPlaceholder(cu, OPCODE_JUMP);
+        IntBufferAdd(cu->curParser->vm, &jmpToEnds, falseBranchEnd);
 
-    // 进入else分支编译之前,先回填falseBranchStart
-    patchPlaceholder(cu, falseBranchStart);
+        patchPlaceholder(cu, falseBranchStart); // 上一个条件测试失败的跳转地址为下一个测试条件的地址
+        consumeCurToken(cu->curParser, TOKEN_LEFT_PAREN, "missing '(' after if!");
+        expression(cu, BP_LOWEST); // 生成计算else if条件表达式的指令步骤
+        consumeCurToken(cu->curParser,
+                        TOKEN_RIGHT_PAREN, "missing ')' before '{' in if!");
+        // 若条件为假, if跳转到false分支的起始地址,现为该地址设置占位符
+        falseBranchStart =
+            emitInstrWithPlaceholder(cu, OPCODE_JUMP_IF_FALSE);
 
-    // 编译else分支
-    compileStatement(cu);
+        // 编译else if的代码块
+        compileStatement(cu);
+      }
+      else // else编译
+      {
+        // 添加跳过else分支的跳转指令
+        uint32_t falseBranchEnd = emitInstrWithPlaceholder(cu, OPCODE_JUMP);
+        IntBufferAdd(cu->curParser->vm, &jmpToEnds, falseBranchEnd);
 
-    // 此时知道了false块的结束地址,回填falseBranchEnd
-    patchPlaceholder(cu, falseBranchEnd);
+        // 进入else分支编译之前,先回填falseBranchStart
+        patchPlaceholder(cu, falseBranchStart);
+
+        // 编译else分支
+        compileStatement(cu);
+
+        break; // 遇到了else结束if语句编译
+      }
+    }
+    else // 结束if语句的编译
+    {
+      // 此时falseBranchStart就是件为假时,需要跳过整个true分支的目标地址
+      patchPlaceholder(cu, falseBranchStart);
+      break;
+    }
   }
-  else // 若不包括else块
-  {
-    // 此时falseBranchStart就是件为假时,需要跳过整个true分支的目标地址
-    patchPlaceholder(cu, falseBranchStart);
-  }
+
+  for (uint32_t i = 0; i < jmpToEnds.count; i++)
+    patchPlaceholder(cu, jmpToEnds.datas[i]); // 所有满足条件的代码块执行完毕后都会跳转到这里
+
+  IntBufferClear(cu->curParser->vm, &jmpToEnds);
 }
 
 // 开始循环,进入循环体的相关设置等

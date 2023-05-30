@@ -27,10 +27,7 @@ fun assert_deep_equal(a, b, msg) {
 
     if(a.type == String || a.type == Num || a == null) {
         assert_equal(a, b, msg)
-        return
-    }
-
-    if(a.type == List) {
+    } else if(a.type == List) {
         assert_equal(a.count, b.count, msg)
         if(a.count == 0) {
             return
@@ -38,16 +35,13 @@ fun assert_deep_equal(a, b, msg) {
         for i (0..a.count-1) {
             assert_deep_equal(a[i], b[i], msg)
         }
-        return
-    }
-
-    if(a.type == Map) {
+    } else if(a.type == Map) {
         assert_equal(a.count, b.count, msg)
         for key (a.keys) {
             assert_deep_equal(a[key], b[key], msg)
         }
         return
+    } else {
+        assert_equal(a, b, msg)
     }
-
-    assert_equal(a, b, msg)
 }

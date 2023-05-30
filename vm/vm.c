@@ -558,7 +558,11 @@ VMResult executeInstruction(VM *vm, register ObjThread *curThread)
                 ObjFn *objFn = VALUE_TO_OBJCLOSURE(args[0])->fn;
                 //-1是去掉实例this
                 if (argNum - 1 < objFn->argNum)
+#ifndef DEBUG
                     RUN_ERROR("arguments less");
+#else
+                    RUN_ERROR("(%s) line %d: arguments less", INSTR_FN_NAME, INSTR_LINENO);
+#endif
 
                 STORE_CUR_FRAME();
                 createFrame(vm, curThread, VALUE_TO_OBJCLOSURE(args[0]), argNum);
@@ -645,7 +649,7 @@ VMResult executeInstruction(VM *vm, register ObjThread *curThread)
         // 栈顶: 跳转条件bool值
         // 指令流: 2字节的跳转偏移量
         int16_t offset = READ_SHORT();
-        ASSERT(offset > 0, "OPCODE_JUMP_IF_FALSE`s operand must be positive!");
+        ASSERT(offset >= 0, "OPCODE_JUMP_IF_FALSE`s operand must be positive!");
         Value condition = POP();
         if (VALUE_IS_FALSE(condition) || VALUE_IS_NULL(condition))
             ip += offset;

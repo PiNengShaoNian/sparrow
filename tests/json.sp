@@ -128,30 +128,17 @@ fun from_json(str) {
 
     if(c == "{") {
       return parseObject()
-    }
-
-    if(c == "[") {
+    } else if(c == "[") {
       return paseArray()
-    }
-
-    if(n - idx >= 4 && str[idx..idx+3] == "null") {
+    } else if(n - idx >= 4 && str[idx..idx+3] == "null") {
       return null
-    }
-    
-    if(n - idx >= 4 && str[idx..idx+3] == "true") {
+    } else if(n - idx >= 4 && str[idx..idx+3] == "true") {
       return true
-    }
-
-    if(n - idx >= 5 && str[idx..4] == "false") {
+    } else if(n - idx >= 5 && str[idx..4] == "false") {
       return false
-    }
-
-    if(str[idx] == "\"") {
+    } else if(str[idx] == "\"") {
       return parseStr()
-    }
-
-
-    if(str.byteAt_(idx) >= 48 && str.byteAt_(idx) <= 57) {
+    } else if(str.byteAt_(idx) >= 48 && str.byteAt_(idx) <= 57) {
       return parseNum()
     }
 
@@ -177,10 +164,7 @@ fun to_json(obj) {
         Impl(x)
       }
       ans = ans + "]"
-      return
-    }
-
-    if(v.type == Map) {
+    } else if(v.type == Map) {
       var first = true
       ans = ans + "{"
       for key (v.keys) {
@@ -194,20 +178,14 @@ fun to_json(obj) {
         Impl(value)
       }
       ans = ans + "}"
-      return
-    }
-
-    if(v.type == String) {
+    } else if(v.type == String) {
       ans = ans + "\"%(v)\""
-      return
-    }
-
-    if(v.type == Num) {
+    } else if(v.type == Num) {
       ans = ans + "%(v.toString)"
-      return
+    } else {
+      Thread.abort("unreachable!")
     }
 
-    Thread.abort("unreachable!")
   }
 
   Impl(obj)
