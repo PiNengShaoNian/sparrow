@@ -22,7 +22,7 @@ ObjList *newObjList(VM *vm, uint32_t elementNum)
 void insertElement(VM *vm, ObjList *objList, uint32_t index, Value value)
 {
   if (index > objList->elements.count - 1)
-    RUN_ERROR("index out bounded!");
+    RUN_ERROR(vm->curThread, "index out bounded!");
 
   if (VALUE_IS_OBJ(value))
     pushTmpRoot(vm, VALUE_TO_OBJ(value));

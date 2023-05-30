@@ -3,6 +3,9 @@
 #include "parser.h"
 #include "gc.h"
 #include <stdarg.h>
+#if DEBUG
+#include "debug.h"
+#endif
 
 // 内存管理3种功能
 //     1 申请内存
@@ -61,7 +64,8 @@ void symbolTableClear(VM *vm, SymbolTable *buffer)
 }
 
 // 通用报错函数
-void errorReport(void *parser, ErrorType errorType, const char *fmt, ...)
+void errorReport(void *parser, void *curThread, ErrorType errorType,
+                 const char *fmt, ...)
 {
     char buffer[DEFAULT_BUFFER_SIZE] = {'\0'};
     va_list ap;
@@ -82,6 +86,9 @@ void errorReport(void *parser, ErrorType errorType, const char *fmt, ...)
         break;
     case ERROR_RUNTIME:
         fprintf(stderr, "%s\n", buffer);
+#ifdef DEBUG
+        dumpCallStack(curThread);
+#endif
         break;
     default:
         NOT_REACHED();

@@ -217,7 +217,7 @@ static void validateSuperClass(VM *vm, Value classNameValue, uint32_t fieldNum, 
     if (!VALUE_IS_CLASS(superClassValue))
     {
         ObjString *classNameString = VALUE_TO_OBJSTR(classNameValue);
-        RUN_ERROR("class \"%s\" `s superClass is not a valid class!",
+        RUN_ERROR(vm->curThread, "class \"%s\" `s superClass is not a valid class!",
                   classNameString->value.start);
     }
 
@@ -233,12 +233,12 @@ static void validateSuperClass(VM *vm, Value classNameValue, uint32_t fieldNum, 
         superClass == vm->numClass ||
         superClass == vm->fnClass ||
         superClass == vm->threadClass)
-        RUN_ERROR("superClass mustn`t be a builtin class!");
+        RUN_ERROR(vm->curThread, "superClass mustn`t be a builtin class!");
 
     // 子类也要继承基类的域,
     // 故子类自己的域+基类域的数量不可超过MAX_FIELD_NUM
     if (superClass->fieldNum + fieldNum > MAX_FIELD_NUM)
-        RUN_ERROR("number of field including super exceed %d!", MAX_FIELD_NUM);
+        RUN_ERROR(vm->curThread, "number of field including super exceed %d!", MAX_FIELD_NUM);
 }
 
 // 修正部分指令操作数
@@ -381,10 +381,6 @@ VMResult executeInstruction(VM *vm, register ObjThread *curThread)
 
 #define CASE(shortOpCode) case OPCODE_##shortOpCode
 #define LOOP() goto loopStart
-#define INSTR_LINENO \
-    (curFrame->closure->fn->debug->lineNo.datas[ip - curFrame->closure->fn->instrStream.datas - 1])
-#define INSTR_FN_NAME \
-    (curFrame->closure->fn->debug->fnName)
 
     LOAD_CUR_FRAME();
     DECODE
@@ -497,11 +493,10 @@ VMResult executeInstruction(VM *vm, register ObjThread *curThread)
 
         invokeMethod:
             if ((uint32_t)index >= class->methods.count || (method = &class->methods.datas[index])->type == MT_NONE)
-#ifndef DEBUG
-                RUN_ERROR("method \"%s\" not found!", vm->allMethodNames.datas[index].str);
-#else
-                RUN_ERROR("(%s) line %d: method \"%s\" not found!", INSTR_FN_NAME, INSTR_LINENO, vm->allMethodNames.datas[index].str);
-#endif
+            {
+                STORE_CUR_FRAME();
+                RUN_ERROR(curThread, "method \"%s\" not found!", vm->allMethodNames.datas[index].str);
+            }
 
             switch (method->type)
             {
@@ -529,9 +524,9 @@ VMResult executeInstruction(VM *vm, register ObjThread *curThread)
 #ifndef DEBUG
                             printf("%s\n", err->value.start);
 #else
-                            printf("(%s) line %d: %s\n", INSTR_FN_NAME, INSTR_LINENO, err->value.start);
+                            printf("%s\n", err->value.start);
+                            dumpCallStack(curThread);
 #endif
-                            fflush(stdout);
                         }
 
                         // 出错后将返回值置为null,避免主调方获取到错误的结果
@@ -556,15 +551,13 @@ VMResult executeInstruction(VM *vm, register ObjThread *curThread)
             case MT_FN_CALL:
                 ASSERT(VALUE_IS_OBJCLOSURE(args[0]), "instance must be a closure!");
                 ObjFn *objFn = VALUE_TO_OBJCLOSURE(args[0])->fn;
-                //-1是去掉实例this
-                if (argNum - 1 < objFn->argNum)
-#ifndef DEBUG
-                    RUN_ERROR("arguments less");
-#else
-                    RUN_ERROR("(%s) line %d: arguments less", INSTR_FN_NAME, INSTR_LINENO);
-#endif
 
                 STORE_CUR_FRAME();
+
+                //-1是去掉实例this
+                if (argNum - 1 < objFn->argNum)
+                    RUN_ERROR(curThread, "arguments less");
+
                 createFrame(vm, curThread, VALUE_TO_OBJCLOSURE(args[0]), argNum);
                 LOAD_CUR_FRAME(); // 加载最新的frame
                 break;
@@ -811,6 +804,7 @@ VMResult executeInstruction(VM *vm, register ObjThread *curThread)
         // 次栈顶的空间暂时保留,创建的类会直接用该空间.
         DROP();
 
+        STORE_CUR_FRAME();
         // 校验基类合法性,若不合法则停止运行
         validateSuperClass(vm, className, fieldNum, superClass);
         Class *class = newClass(vm, VALUE_TO_OBJSTR(className),

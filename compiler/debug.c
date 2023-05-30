@@ -373,4 +373,22 @@ void dumpInstructions(VM *vm, ObjFn *fn)
   printf("\n");
 }
 
+void dumpCallStack(ObjThread *curThread)
+{
+#define INSTR_LINENO \
+  (curFrame->closure->fn->debug->lineNo.datas[ip - curFrame->closure->fn->instrStream.datas - 1])
+#define INSTR_FN_NAME \
+  (curFrame->closure->fn->debug->fnName)
+  for (int i = curThread->usedFrameNum - 1; i >= 0; i--)
+  {
+    Frame *curFrame = &curThread->frames[i];
+    uint8_t *ip = curFrame->ip;
+
+    // ip表示当前执行中指令的下一条指令的起始地址，在这个基础上减去1就是当前指令的末尾
+    // 去除该处byte所对应的行号即可
+    printf("(%s) line: %d\n", INSTR_FN_NAME, INSTR_LINENO);
+  }
+  fflush(stdout);
+}
+
 #endif // DEBUG

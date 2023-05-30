@@ -86,7 +86,7 @@ static char *getFilePath(const char *moduleName)
 // 从modules中获取名为moduleName的模块
 static ObjModule *getModule(VM *vm, Value moduleName)
 {
-  Value value = mapGet(vm->allModules, moduleName);
+  Value value = mapGet(vm, vm->allModules, moduleName);
   if (value.type == VT_UNDEFINED)
     return NULL;
 
@@ -175,7 +175,7 @@ static void printString(const char *str)
 static Value importModule(VM *vm, Value moduleName)
 {
   // 若已经导入则返回NULL_VAL
-  if (!VALUE_IS_UNDEFINED(mapGet(vm->allModules, moduleName)))
+  if (!VALUE_IS_UNDEFINED(mapGet(vm, vm->allModules, moduleName)))
     return VT_TO_VALUE(VT_NULL);
 
   ObjString *objString = VALUE_TO_OBJSTR(moduleName);
@@ -530,7 +530,7 @@ static bool primObjectIs(VM *vm, Value *args)
 {
   // args[1]必须是class
   if (!VALUE_IS_CLASS(args[1]))
-    RUN_ERROR("argument must be class!");
+    RUN_ERROR(vm->curThread, "argument must be class!");
 
   Class *thisClass = getClassOfObj(vm, args[0]);
   Class *baseClass = (Class *)(args[1].objHeader);
@@ -695,7 +695,7 @@ static bool switchThread(VM *vm, ObjThread *nextThread, Value *args, bool withAr
 {
   // 在下一线程nextThread执行之前,其主调线程应该为空
   if (nextThread->caller != NULL)
-    RUN_ERROR("thread has been called!");
+    RUN_ERROR(vm->curThread, "thread has been called!");
 
   nextThread->caller = vm->curThread;
 
@@ -799,7 +799,7 @@ static bool primNumFromString(VM *vm, Value *args)
     endPtr++;
 
   if (errno == ERANGE)
-    RUN_ERROR("string too large!");
+    RUN_ERROR(vm->curThread, "string too large!");
 
   // 如果字符串中不能转换的字符不全是空白,字符串非法,返回NULL
   if (endPtr < objString->value.start + objString->value.length)
@@ -1403,7 +1403,7 @@ static bool primMapSubscript(VM *vm, Value *args)
   ObjMap *objMap = VALUE_TO_OBJMAP(args[0]);
 
   // 从map中查找key(args[1])对应的value
-  Value value = mapGet(objMap, args[1]);
+  Value value = mapGet(vm, objMap, args[1]);
 
   // 若没有相应的key则返回NULL
   if (VALUE_IS_UNDEFINED(value))
@@ -1460,7 +1460,7 @@ static bool primMapContainsKey(VM *vm, Value *args)
     return false; // 出错了,切换线程
 
   // 直接去get该key,判断是否get成功
-  RET_BOOL(!VALUE_IS_UNDEFINED(mapGet(VALUE_TO_OBJMAP(args[0]), args[1])));
+  RET_BOOL(!VALUE_IS_UNDEFINED(mapGet(vm, VALUE_TO_OBJMAP(args[0]), args[1])));
 }
 
 // objMap.count:返回map中entry个数

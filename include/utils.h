@@ -102,19 +102,19 @@ DECLARE_BUFFER_TYPE(Byte)
 void symbolTableClear(VM *, SymbolTable *buffer);
 
 #define IO_ERROR(...) \
-    errorReport(NULL, ERROR_IO, __VA_ARGS__)
+    errorReport(NULL, NULL, ERROR_IO, __VA_ARGS__)
 
 #define MEM_ERROR(...) \
-    errorReport(NULL, ERROR_MEM, __VA_ARGS__)
+    errorReport(NULL, NULL, ERROR_MEM, __VA_ARGS__)
 
 #define LEX_ERROR(parser, ...) \
-    errorReport(parser, ERROR_LEX, __VA_ARGS__)
+    errorReport(parser, NULL, ERROR_LEX, __VA_ARGS__)
 
 #define COMPILE_ERROR(parser, ...) \
-    errorReport(parser, ERROR_COMPILE, __VA_ARGS__)
+    errorReport(parser, NULL, ERROR_COMPILE, __VA_ARGS__)
 
-#define RUN_ERROR(...) \
-    errorReport(NULL, ERROR_RUNTIME, __VA_ARGS__)
+#define RUN_ERROR(curThread, ...) \
+    errorReport(NULL, curThread, ERROR_RUNTIME, __VA_ARGS__)
 
 typedef enum
 {
@@ -125,7 +125,7 @@ typedef enum
     ERROR_RUNTIME
 } ErrorType;
 
-void errorReport(void *parser, ErrorType errorType, const char *fmt, ...);
+void errorReport(void *parser, void *curThread, ErrorType errorType, const char *fmt, ...);
 
 #define DEFAULT_BUFFER_SIZE 512
 

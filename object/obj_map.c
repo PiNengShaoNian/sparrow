@@ -23,7 +23,7 @@ static uint32_t hashNum(double num)
 }
 
 // 计算对象的哈希码
-static uint32_t hashObj(ObjHeader *objHeader)
+static uint32_t hashObj(VM *vm, ObjHeader *objHeader)
 {
     switch (objHeader->type)
     {
@@ -38,14 +38,14 @@ static uint32_t hashObj(ObjHeader *objHeader)
     case OT_STRING:
         return ((ObjString *)objHeader)->hashCode;
     default:
-        RUN_ERROR("the hashable are objstring, objrange and class.");
+        RUN_ERROR(vm->curThread, "the hashable are objstring, objrange and class.");
     }
 
     return 0;
 }
 
 // 根据value的类型调用相应的哈希函数
-static uint32_t hashValue(Value value)
+static uint32_t hashValue(VM *vm, Value value)
 {
     switch (value.type)
     {
@@ -58,18 +58,18 @@ static uint32_t hashValue(Value value)
     case VT_TRUE:
         return 2;
     case VT_OBJ:
-        return hashObj(value.objHeader);
+        return hashObj(vm, value.objHeader);
     default:
-        RUN_ERROR("unsupported type hashed!");
+        RUN_ERROR(vm->curThread, "unsupported type hashed!");
     }
 
     return 0;
 }
 
 // 在entries中添加entry,如果是新的key则返回true
-static bool addEntry(Entry *entries, uint32_t capacity, Value key, Value value)
+static bool addEntry(VM *vm, Entry *entries, uint32_t capacity, Value key, Value value)
 {
-    uint32_t index = hashValue(key) % capacity;
+    uint32_t index = hashValue(vm, key) % capacity;
 
     // 通过开放探测法去找可用的slot
     while (true)
@@ -115,7 +115,7 @@ static void resizeMap(VM *vm, ObjMap *objMap, uint32_t newCapacity)
         {
             // 该slot有值
             if (entryArr[idx].key.type != VT_UNDEFINED)
-                addEntry(newEntries, newCapacity, entryArr[idx].key, entryArr[idx].value);
+                addEntry(vm, newEntries, newCapacity, entryArr[idx].key, entryArr[idx].value);
 
             idx++;
         }
@@ -128,7 +128,7 @@ static void resizeMap(VM *vm, ObjMap *objMap, uint32_t newCapacity)
 }
 
 // 在objMap中查找key对应的entry
-static Entry *findEntry(ObjMap *objMap, Value key)
+static Entry *findEntry(VM *vm, ObjMap *objMap, Value key)
 {
     // objMap为空则返回null
     if (objMap->capacity == 0)
@@ -136,7 +136,7 @@ static Entry *findEntry(ObjMap *objMap, Value key)
 
     // 以下开放定址探测
     // 用哈希值对容量取模计算槽位(slot)
-    uint32_t index = hashValue(key) % objMap->capacity;
+    uint32_t index = hashValue(vm, key) % objMap->capacity;
     Entry *entry;
     while (true)
     {
@@ -170,14 +170,14 @@ void mapSet(VM *vm, ObjMap *objMap, Value key, Value value)
     }
 
     // 若创建了新的key则使objMap->count加1
-    if (addEntry(objMap->entries, objMap->capacity, key, value))
+    if (addEntry(vm, objMap->entries, objMap->capacity, key, value))
         objMap->count++;
 }
 
 // 从map中查找key对应的value: map[key]
-Value mapGet(ObjMap *objMap, Value key)
+Value mapGet(VM *vm, ObjMap *objMap, Value key)
 {
-    Entry *entry = findEntry(objMap, key);
+    Entry *entry = findEntry(vm, objMap, key);
     if (entry == NULL)
         return VT_TO_VALUE(VT_UNDEFINED);
 
@@ -195,7 +195,7 @@ void clearMap(VM *vm, ObjMap *objMap)
 // 删除objMap中的key,返回map[key]
 Value removeKey(VM *vm, ObjMap *objMap, Value key)
 {
-    Entry *entry = findEntry(objMap, key);
+    Entry *entry = findEntry(vm, objMap, key);
 
     if (entry == NULL)
         return VT_TO_VALUE(VT_NULL);

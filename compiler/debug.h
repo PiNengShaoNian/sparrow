@@ -14,5 +14,7 @@ void dumpInstructions(VM *vm, ObjFn *fn);
 
 void dumpStack(ObjThread *thread);
 
+void dumpCallStack(ObjThread *curThread);
+
 #endif
 #endif
