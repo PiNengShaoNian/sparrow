@@ -864,6 +864,7 @@ PRIM_NUM_MATH_FN(primNumCeil, ceil);
 PRIM_NUM_MATH_FN(primNumCos, cos);
 PRIM_NUM_MATH_FN(primNumFloor, floor);
 PRIM_NUM_MATH_FN(primNumNegate, -);
+PRIM_NUM_MATH_FN(primNumNop, +);
 PRIM_NUM_MATH_FN(primNumSin, sin);
 PRIM_NUM_MATH_FN(primNumSqrt, sqrt); // 开方
 PRIM_NUM_MATH_FN(primNumTan, tan);
@@ -1944,6 +1945,7 @@ void buildCore(VM *vm)
   PRIM_METHOD_BIND(vm->numClass, "cos", primNumCos);
   PRIM_METHOD_BIND(vm->numClass, "floor", primNumFloor);
   PRIM_METHOD_BIND(vm->numClass, "-", primNumNegate);
+  PRIM_METHOD_BIND(vm->numClass, "+", primNumNop);
   PRIM_METHOD_BIND(vm->numClass, "sin", primNumSin);
   PRIM_METHOD_BIND(vm->numClass, "sqrt", primNumSqrt);
   PRIM_METHOD_BIND(vm->numClass, "tan", primNumTan);

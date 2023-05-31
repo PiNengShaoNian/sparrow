@@ -1618,7 +1618,7 @@ SymbolBindRule Rules[] = {
     /* TOKEN_RIGHT_BRACE */ UNUSED_RULE,
     /* TOKEN_DOT */ INFIX_SYMBOL(BP_CALL, callEntry),
     /* TOKEN_DOT_DOT */ INFIX_OPERATOR("..", BP_RANGE),
-    /* TOKEN_ADD */ INFIX_OPERATOR("+", BP_TERM),
+    /* TOKEN_ADD */ MIX_OPERATOR("+"),
     /* TOKEN_SUB */ MIX_OPERATOR("-"),
     /* TOKEN_MUL */ INFIX_OPERATOR("*", BP_FACTOR),
     /* TOKEN_DIV */ INFIX_OPERATOR("/", BP_FACTOR),
@@ -1649,6 +1649,11 @@ static void expression(CompileUnit *cu, BindPower rbp)
 
   // 进入expression时,curToken是操作数w, preToken是运算符S
   DenotationFn nud = Rules[cu->curParser->curToken.type].nud;
+
+  // "="号会被赋值语句和声明语句消费掉，到这如果到这碰到了"="那么代表
+  // 该表达式不是合法的赋值表达式比如"3 = 4"
+  if (matchToken(cu->curParser, TOKEN_ASSIGN))
+    COMPILE_ERROR(cu->curParser, "can't assign to temporary");
 
   // 表达式开头的要么是操作数要么是前缀运算符,必然有nud方法
   ASSERT(nud != NULL, "nud is NULL!");
