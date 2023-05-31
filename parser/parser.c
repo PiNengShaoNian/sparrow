@@ -177,14 +177,14 @@ static void parseNum(Parser *parser)
 }
 
 // 解析unicode码点
-static void parseUnicodeCodePoint(Parser *parser, ByteBuffer *buf)
+static void parseUnicodeCodePoint(Parser *parser, ByteBuffer *buf, uint32_t bytes)
 {
   uint32_t idx = 0;
   int value = 0;
   uint8_t digit = 0;
 
   // 获取数值,u后面跟着4位十六进制数字
-  while (idx++ < 4)
+  while (idx++ < bytes)
   {
     getNextChar(parser);
     if (parser->curChar == '\0')
@@ -270,7 +270,10 @@ static void parseString(Parser *parser)
         ByteBufferAdd(parser->vm, &str, '\t');
         break;
       case 'u':
-        parseUnicodeCodePoint(parser, &str);
+        parseUnicodeCodePoint(parser, &str, 4);
+        break;
+      case 'U':
+        parseUnicodeCodePoint(parser, &str, 8);
         break;
       case '"':
         ByteBufferAdd(parser->vm, &str, '"');
