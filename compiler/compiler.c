@@ -39,6 +39,9 @@ struct compileUnit
 
   // 当前parser
   Parser *curParser;
+
+  // 最后写入的一条指令的长度
+  uint8_t lastInstructionLen;
 }; // 编译单元
 
 typedef enum
@@ -137,6 +140,7 @@ static void initCompileUnit(Parser *parser, CompileUnit *cu,
   cu->enclosingUnit = enclosingUint;
   cu->curLoop = NULL;
   cu->enclosingClassBK = NULL;
+  cu->lastInstructionLen = 0;
 
   // 若没有外层,说明当前属于模块作用域
   if (enclosingUint == NULL)
@@ -217,6 +221,7 @@ inline static void writeShortOperand(CompileUnit *cu, int operand)
 // 写入操作数为1字节大小的指令
 static int writeOpCodeByteOperand(CompileUnit *cu, OpCode opCode, int operand)
 {
+  cu->lastInstructionLen = 2;
   writeOpCode(cu, opCode);
   return writeByteOperand(cu, operand);
 }
@@ -224,8 +229,30 @@ static int writeOpCodeByteOperand(CompileUnit *cu, OpCode opCode, int operand)
 // 写入操作数为2字节大小的指令
 static void writeOpCodeShortOperand(CompileUnit *cu, OpCode opCode, int operand)
 {
+  cu->lastInstructionLen = 3;
   writeOpCode(cu, opCode);
   writeShortOperand(cu, operand);
+}
+
+// 复制一条位于最后的指令
+static void dupLastInstruction(CompileUnit *cu)
+{
+  int len = cu->lastInstructionLen;
+  int instrCount = cu->fn->instrStream.count;
+  Byte *instructions = cu->fn->instrStream.datas;
+  switch (len)
+  {
+  case 2:
+    writeOpCodeByteOperand(cu, instructions[instrCount - 2],
+                           instructions[instrCount - 1]);
+    break;
+  case 3:
+    writeOpCodeShortOperand(cu, instructions[instrCount - 3],
+                            instructions[instrCount - 2] << 8 | instructions[instrCount - 1]);
+    break;
+  default:
+    NOT_REACHED();
+  }
 }
 
 // 在模块objModule中定义名为name,值为value的模块变量
@@ -1148,25 +1175,51 @@ static void condition(CompileUnit *cu, UNUSED bool canAssign)
 static void emitMethodCall(CompileUnit *cu, const char *name,
                            uint32_t length, OpCode opCode, bool canAssign)
 {
-  Signature sign;
-  sign.type = SIGN_GETTER;
-  sign.name = name;
-  sign.length = length;
+  Signature fieldSign;
+  fieldSign.type = SIGN_GETTER;
+  fieldSign.name = name;
+  fieldSign.length = length;
 
   // 若是setter则生成调用setter的指令
   if (matchToken(cu->curParser, TOKEN_ASSIGN) && canAssign)
   {
-    sign.type = SIGN_SETTER;
-    sign.argNum = 1; // setter只接受一个参数
+    fieldSign.type = SIGN_SETTER;
+    fieldSign.argNum = 1; // setter只接受一个参数
 
     // 载入实参(即'='右边所赋的值),为下面方法调用传参
     expression(cu, BP_LOWEST);
 
-    emitCallBySignature(cu, &sign, opCode);
+    emitCallBySignature(cu, &fieldSign, opCode);
+  }
+  else if (canAssign && Rules[cu->curParser->curToken.type].assign &&
+           matchLookAHeadToken(cu->curParser, TOKEN_ASSIGN)) // +=,-=
+  {
+    /**
+     * a.x += b 会生成    Load   a
+     *                   Load   a
+     *                   Call   a.x   # 调用x的getter函数
+     *                   Load   b
+     *                   Call   x.+   # 把a.x和b加起来
+     *                   Call   a.x=  # 调用x的setter函数
+     */
+    Token opToken = cu->curParser->curToken;
+    // 消费掉+和=
+    getNextToken(cu->curParser);
+    getNextToken(cu->curParser);
+    // 先前已经Load a,在这里我们dup最后一条指令, 也就是再Load一次a
+    dupLastInstruction(cu);                       // Load a
+    emitGetterMethodCall(cu, &fieldSign, opCode); // Call a.x
+    expression(cu, BP_LOWEST);                    // Load b
+    // 生成+方法调用指令
+    Signature opSign = {SIGN_METHOD, opToken.start, opToken.length, 1};
+    emitCallBySignature(cu, &opSign, OPCODE_CALL0); // Call x.+
+    fieldSign.type = SIGN_SETTER;
+    fieldSign.argNum = 1;                              // setter只接受一个参数
+    emitCallBySignature(cu, &fieldSign, OPCODE_CALL0); // Call   a.x=
   }
   else
   {
-    emitGetterMethodCall(cu, &sign, opCode);
+    emitGetterMethodCall(cu, &fieldSign, opCode);
   }
 }
 
@@ -1769,10 +1822,8 @@ static void defineFieldDefaultSetter(CompileUnit *cu, Variable classVar, int fie
 
   writeOpCodeByteOperand(&setterCU, OPCODE_LOAD_LOCAL_VAR, 1); // 加载第一个参数到栈中
   writeOpCodeByteOperand(&setterCU, OPCODE_STORE_THIS_FIELD,
-                         fieldIndex); // 将参数赋值到字段中
-  writeOpCode(&setterCU, OPCODE_POP); // 弹出参数
-  writeOpCode(&setterCU, OPCODE_PUSH_NULL);
-  writeOpCode(&setterCU, OPCODE_RETURN); // 将上面栈顶的值返回
+                         fieldIndex);    // 将参数赋值到字段中
+  writeOpCode(&setterCU, OPCODE_RETURN); // 将字段的最新值返回
 
 #if DEBUG
   endCompileUnit(&setterCU, signatureString, signLen);
