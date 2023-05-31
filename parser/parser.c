@@ -352,6 +352,15 @@ static void skipComment(Parser *parser)
 // 获得下一个token
 void getNextToken(Parser *parser)
 {
+  // 有过先前有lookahead过，就返回lookahead token
+  if (parser->lookAheadToken.type != TOKEN_UNKNOWN)
+  {
+    parser->preToken = parser->curToken;
+    parser->curToken = parser->lookAheadToken;
+    parser->lookAheadToken.type = TOKEN_UNKNOWN;
+    return;
+  }
+
   parser->preToken = parser->curToken;
   skipBlanks(parser); // 跳过待识别单词之前的空格
   parser->curToken.type = TOKEN_EOF;
@@ -533,6 +542,22 @@ bool matchToken(Parser *parser, TokenType expected)
   return false;
 }
 
+// 向前查看一个token,仅匹配,不消费任何token
+bool matchLookAHeadToken(Parser *parser, TokenType expected)
+{
+  if (parser->lookAheadToken.type != TOKEN_UNKNOWN)
+    return parser->lookAheadToken.type == expected;
+
+  Token preToken = parser->preToken;
+  Token curToken = parser->curToken;
+  getNextToken(parser);
+
+  parser->lookAheadToken = parser->curToken;
+  parser->curToken = curToken;
+  parser->preToken = preToken;
+  return parser->lookAheadToken.type == expected;
+}
+
 // 断言当前token为expected并读入下一token,否则报错errMsg
 void consumeCurToken(Parser *parser, TokenType expected, const char *errMsg)
 {
@@ -564,6 +589,7 @@ void initParser(VM *vm, Parser *parser, const char *file,
   parser->curToken.start = NULL;
   parser->curToken.length = 0;
   parser->preToken = parser->curToken;
+  parser->lookAheadToken = parser->curToken;
   parser->interpolationExpectRightParenNum = 0;
   parser->vm = vm;
   parser->curModule = objModule;

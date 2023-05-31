@@ -13,7 +13,7 @@ fun from_json(str) {
     while(idx < n) {
       var c = str[idx]
       if(c == " " || c == "\n" || c == "\t") {
-        idx = idx + 1
+        idx += 1
       }
       else {
         break
@@ -27,7 +27,7 @@ fun from_json(str) {
     var got = idx >= n ? "EOF" : str[idx]
 
     if(char == got) {
-      idx = idx + 1
+      idx += 1
     }
     else {
       Thread.abort("expect '%(char)' but got '%(got)'")
@@ -43,12 +43,12 @@ fun from_json(str) {
       }
 
       if(str[idx] == ",") {
-        idx = idx + 1
+        idx += 1
         continue
       }
 
       if(str[idx] == "]") {
-        idx = idx + 1
+        idx += 1
         return list
       } else {
         var v = parseJson()
@@ -81,7 +81,7 @@ fun from_json(str) {
       }
 
       if(str[idx] == ",") {
-        idx = idx + 1
+        idx += 1
       } else {
         match("}")
         return obj
@@ -93,13 +93,13 @@ fun from_json(str) {
     match("\"")
     var start = idx
     while(idx < n && str[idx] != "\"") {
-      idx = idx + 1
+      idx += 1
     }
 
     if(idx >= n) {
       Thread.abort("unterminated string")
     } else {
-      idx = idx + 1
+      idx += 1
       return str[start..idx-2]
     }
   }
@@ -110,7 +110,7 @@ fun from_json(str) {
       var char = str.byteAt_(idx) - 48
       if(char >= 0 && char <= 9) {
         a = a * 10 + char
-        idx = idx + 1
+        idx += 1
       } else {
         break
       }
@@ -155,37 +155,36 @@ fun to_json(obj) {
   Impl = Fn.new{|v| 
     if(v.type == List) {
       var first = true
-      ans = ans + "["
+      ans += "["
       for x (v) {
         if(!first) {
-          ans = ans + ","
+          ans += ","
         }
         first = false
         Impl(x)
       }
-      ans = ans + "]"
+      ans += "]"
     } else if(v.type == Map) {
       var first = true
-      ans = ans + "{"
+      ans += "{"
       for key (v.keys) {
         var value = v[key]
         if(!first) {
-          ans = ans + "," 
+          ans += "," 
         }
         first = false
         Impl(key)
-        ans = ans + ":"
+        ans += ":"
         Impl(value)
       }
-      ans = ans + "}"
+      ans += "}"
     } else if(v.type == String) {
-      ans = ans + "\"%(v)\""
+      ans += "\"%(v)\""
     } else if(v.type == Num) {
-      ans = ans + "%(v.toString)"
+      ans += v.toString
     } else {
       Thread.abort("unreachable!")
     }
-
   }
 
   Impl(obj)

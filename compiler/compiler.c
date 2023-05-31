@@ -111,6 +111,9 @@ typedef struct
   // 表示本符号在类中被视为一个方法,
   // 为其生成一个方法签名.
   methodSignatureFn methodSign;
+
+  bool assign; // 一个中缀表达式是否可以和"="组合,比如+和-就可以组合为+=,-=
+
 } SymbolBindRule; // 符号绑定规则
 
 static uint32_t addConstant(CompileUnit *cu, Value constant);
@@ -880,6 +883,7 @@ static void emitStoreVariable(CompileUnit *cu, Variable var)
   }
 }
 
+extern SymbolBindRule Rules[];
 // 生成加载或存储变量的指令
 static void emitLoadOrStoreVariable(CompileUnit *cu, bool canAssign, Variable var)
 {
@@ -887,6 +891,26 @@ static void emitLoadOrStoreVariable(CompileUnit *cu, bool canAssign, Variable va
   {
     expression(cu, BP_LOWEST);  // 计算'='右边表达式的值
     emitStoreVariable(cu, var); // 为var生成赋值指令
+  }
+  else if (canAssign && Rules[cu->curParser->curToken.type].assign &&
+           matchLookAHeadToken(cu->curParser, TOKEN_ASSIGN)) // +=,-=
+  {
+    /**
+     * a += b 会生成      Load   a
+     *                   Load   b
+     *                   Call   a.+
+     *                   Store  a
+     */
+    Token opToken = cu->curParser->curToken;
+    // 消费掉+和=
+    getNextToken(cu->curParser);
+    getNextToken(cu->curParser);
+    emitLoadVariable(cu, var); // Load a
+    expression(cu, BP_LOWEST); // Load b
+    // 生成方法调用指令
+    Signature sign = {SIGN_METHOD, opToken.start, opToken.length, 1};
+    emitCallBySignature(cu, &sign, OPCODE_CALL0); // Call a.+
+    emitStoreVariable(cu, var);                   // Store a
   }
   else
   {
@@ -1550,45 +1574,45 @@ static void id(CompileUnit *cu, bool canAssign)
 
 // 不关注左操作数的符号称为前缀符号
 // 用于如字面量,变量名,前缀符号等非运算符
-#define PREFIX_SYMBOL(nud)         \
-  {                                \
-    NULL, BP_NONE, nud, NULL, NULL \
+#define PREFIX_SYMBOL(nud)                \
+  {                                       \
+    NULL, BP_NONE, nud, NULL, NULL, false \
   }
 
 // 前缀运算符,如'!'
-#define PREFIX_OPERATOR(id)                                \
-  {                                                        \
-    id, BP_NONE, unaryOperator, NULL, unaryMethodSignature \
+#define PREFIX_OPERATOR(id)                                       \
+  {                                                               \
+    id, BP_NONE, unaryOperator, NULL, unaryMethodSignature, false \
   }
 
 // 关注左操作数的符号称为中缀符号
 // 数组'[',函数'(',实例与方法之间的'.'等
-#define INFIX_SYMBOL(lbp, led) \
-  {                            \
-    NULL, lbp, NULL, led, NULL \
+#define INFIX_SYMBOL(lbp, led)        \
+  {                                   \
+    NULL, lbp, NULL, led, NULL, false \
   }
 
 // 中棳运算符
-#define INFIX_OPERATOR(id, lbp)                        \
-  {                                                    \
-    id, lbp, NULL, infixOperator, infixMethodSignature \
+#define INFIX_OPERATOR(id, lbp, assign)                        \
+  {                                                            \
+    id, lbp, NULL, infixOperator, infixMethodSignature, assign \
   }
 
 // 既可做前缀又可做中缀的运算符,如'-'
-#define MIX_OPERATOR(id) \
-  {                      \
-      id, BP_TERM, unaryOperator, infixOperator, mixMethodSignature}
+#define MIX_OPERATOR(id, assign) \
+  {                              \
+      id, BP_TERM, unaryOperator, infixOperator, mixMethodSignature, assign}
 // 占位用的
-#define UNUSED_RULE                 \
-  {                                 \
-    NULL, BP_NONE, NULL, NULL, NULL \
+#define UNUSED_RULE                        \
+  {                                        \
+    NULL, BP_NONE, NULL, NULL, NULL, false \
   }
 
 SymbolBindRule Rules[] = {
     /* TOKEN_INVALID*/ UNUSED_RULE,
     /* TOKEN_NUM */ PREFIX_SYMBOL(literal),
     /* TOKEN_STRING */ PREFIX_SYMBOL(literal),
-    /* TOKEN_ID */ {NULL, BP_NONE, id, NULL, idMethodSignature},
+    /* TOKEN_ID */ {NULL, BP_NONE, id, NULL, idMethodSignature, false},
     /* TOKEN_INTERPOLATION */ PREFIX_SYMBOL(stringInterpolation),
     /* TOKEN_VAR */ UNUSED_RULE,
     /* TOKEN_FUN */ UNUSED_RULE,
@@ -1605,39 +1629,39 @@ SymbolBindRule Rules[] = {
     /* TOKEN_CLASS */ UNUSED_RULE,
     /* TOKEN_THIS */ PREFIX_SYMBOL(this),
     /* TOKEN_STATIC */ UNUSED_RULE,
-    /* TOKEN_IS */ INFIX_OPERATOR("is", BP_IS),
+    /* TOKEN_IS */ INFIX_OPERATOR("is", BP_IS, false),
     /* TOKEN_SUPER */ PREFIX_SYMBOL(super),
     /* TOKEN_IMPORT */ UNUSED_RULE,
     /* TOKEN_COMMA */ UNUSED_RULE,
     /* TOKEN_COMMA */ UNUSED_RULE,
     /* TOKEN_LEFT_PAREN */ PREFIX_SYMBOL(parentheses),
     /* TOKEN_RIGHT_PAREN */ UNUSED_RULE,
-    /* TOKEN_LEFT_BRACKET */ {NULL, BP_CALL, listLiteral, subscript, subscriptMethodSignature},
+    /* TOKEN_LEFT_BRACKET */ {NULL, BP_CALL, listLiteral, subscript, subscriptMethodSignature, false},
     /* TOKEN_RIGHT_BRACKET */ UNUSED_RULE,
     /* TOKEN_LEFT_BRACE */ PREFIX_SYMBOL(mapLiteral),
     /* TOKEN_RIGHT_BRACE */ UNUSED_RULE,
     /* TOKEN_DOT */ INFIX_SYMBOL(BP_CALL, callEntry),
-    /* TOKEN_DOT_DOT */ INFIX_OPERATOR("..", BP_RANGE),
-    /* TOKEN_ADD */ MIX_OPERATOR("+"),
-    /* TOKEN_SUB */ MIX_OPERATOR("-"),
-    /* TOKEN_MUL */ INFIX_OPERATOR("*", BP_FACTOR),
-    /* TOKEN_DIV */ INFIX_OPERATOR("/", BP_FACTOR),
-    /* TOKEN_MOD */ INFIX_OPERATOR("%", BP_FACTOR),
+    /* TOKEN_DOT_DOT */ INFIX_OPERATOR("..", BP_RANGE, false),
+    /* TOKEN_ADD */ MIX_OPERATOR("+", true),
+    /* TOKEN_SUB */ MIX_OPERATOR("-", true),
+    /* TOKEN_MUL */ INFIX_OPERATOR("*", BP_FACTOR, true),
+    /* TOKEN_DIV */ INFIX_OPERATOR("/", BP_FACTOR, true),
+    /* TOKEN_MOD */ INFIX_OPERATOR("%", BP_FACTOR, true),
     /* TOKEN_ASSIGN */ UNUSED_RULE,
-    /* TOKEN_BIT_AND */ INFIX_OPERATOR("&", BP_BIT_AND),
-    /* TOKEN_BIT_OR */ INFIX_OPERATOR("|", BP_BIT_OR),
+    /* TOKEN_BIT_AND */ INFIX_OPERATOR("&", BP_BIT_AND, true),
+    /* TOKEN_BIT_OR */ INFIX_OPERATOR("|", BP_BIT_OR, true),
     /* TOKEN_BIT_NOT */ PREFIX_OPERATOR("~"),
-    /* TOKEN_BIT_SHIFT_RIGHT */ INFIX_OPERATOR(">>", BP_BIT_SHIFT),
-    /* TOKEN_BIT_SHIFT_LEFT */ INFIX_OPERATOR("<<", BP_BIT_SHIFT),
+    /* TOKEN_BIT_SHIFT_RIGHT */ INFIX_OPERATOR(">>", BP_BIT_SHIFT, true),
+    /* TOKEN_BIT_SHIFT_LEFT */ INFIX_OPERATOR("<<", BP_BIT_SHIFT, true),
     /* TOKEN_LOGIC_AND */ INFIX_SYMBOL(BP_LOGIC_AND, logicAnd),
     /* TOKEN_LOGIC_OR */ INFIX_SYMBOL(BP_LOGIC_OR, logicOr),
     /* TOKEN_LOGIC_NOT */ PREFIX_OPERATOR("!"),
-    /* TOKEN_EQUAL */ INFIX_OPERATOR("==", BP_EQUAL),
-    /* TOKEN_NOT_EQUAL */ INFIX_OPERATOR("!=", BP_EQUAL),
-    /* TOKEN_GREATE */ INFIX_OPERATOR(">", BP_CMP),
-    /* TOKEN_GREATE_EQUAL */ INFIX_OPERATOR(">=", BP_CMP),
-    /* TOKEN_LESS */ INFIX_OPERATOR("<", BP_CMP),
-    /* TOKEN_LESS_EQUAL */ INFIX_OPERATOR("<=", BP_CMP),
+    /* TOKEN_EQUAL */ INFIX_OPERATOR("==", BP_EQUAL, false),
+    /* TOKEN_NOT_EQUAL */ INFIX_OPERATOR("!=", BP_EQUAL, false),
+    /* TOKEN_GREATE */ INFIX_OPERATOR(">", BP_CMP, false),
+    /* TOKEN_GREATE_EQUAL */ INFIX_OPERATOR(">=", BP_CMP, false),
+    /* TOKEN_LESS */ INFIX_OPERATOR("<", BP_CMP, false),
+    /* TOKEN_LESS_EQUAL */ INFIX_OPERATOR("<=", BP_CMP, false),
     /* TOKEN_QUESTION */ INFIX_SYMBOL(BP_ASSIGN, condition),
     /* TOKEN_EOF */ UNUSED_RULE};
 

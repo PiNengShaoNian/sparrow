@@ -102,6 +102,7 @@ struct parser
     char curChar;
     Token preToken;
     Token curToken;
+    Token lookAheadToken;
     ObjModule *curModule;        // 当前正在编译的模块
     CompileUnit *curCompileUnit; // 当前编译单元
 
@@ -117,6 +118,7 @@ struct parser
 char lookAheadChar(Parser *parser);
 void getNextToken(Parser *parser);
 bool matchToken(Parser *parser, TokenType expected);
+bool matchLookAHeadToken(Parser *parser, TokenType expected);
 void consumeCurToken(Parser *parser, TokenType expected, const char *errMsg);
 void consumeNextToken(Parser *parser, TokenType expected, const char *errMsg);
 uint32_t getByteNumOfEncodeUtf8(int value);
