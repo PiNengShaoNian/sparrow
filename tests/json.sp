@@ -152,38 +152,47 @@ fun to_json(obj) {
   var ans = ""
   var Impl
 
-  Impl = Fn.new{|v| 
-    if(v.type == List) {
-      var first = true
-      ans += "["
-      for x (v) {
-        if(!first) {
-          ans += ","
+  Impl = Fn.new{|v|
+    switch(v.type) {
+      case List: {
+        var first = true
+        ans += "["
+        for x (v) {
+          if(!first) {
+            ans += ","
+          }
+          first = false
+          Impl(x)
         }
-        first = false
-        Impl(x)
+        ans += "]"
+        break
       }
-      ans += "]"
-    } else if(v.type == Map) {
-      var first = true
-      ans += "{"
-      for key (v.keys) {
-        var value = v[key]
-        if(!first) {
-          ans += "," 
+      case Map: {
+        var first = true
+        ans += "{"
+        for key (v.keys) {
+          var value = v[key]
+          if(!first) {
+            ans += "," 
+          }
+          first = false
+          Impl(key)
+          ans += ":"
+          Impl(value)
         }
-        first = false
-        Impl(key)
-        ans += ":"
-        Impl(value)
+        ans += "}"
+        break
       }
-      ans += "}"
-    } else if(v.type == String) {
-      ans += "\"%(v)\""
-    } else if(v.type == Num) {
-      ans += v.toString
-    } else {
-      Thread.abort("unreachable!")
+      case String: {
+        ans += "\"%(v)\""
+        break
+      }
+      case Num: {
+        ans += v.toString
+        break
+      }
+      default:
+        Thread.abort("unreachable!")
     }
   }
 

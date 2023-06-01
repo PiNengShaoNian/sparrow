@@ -46,10 +46,21 @@ void initVM(VM *vm)
 
     vm->grays.count = 0;
     vm->grays.capacity = 32;
+    vm->tmpRootNum = 0;
 
     // 初始化指针数组grayObjects
     vm->grays.grayObjects =
         (ObjHeader **)malloc(vm->grays.capacity * sizeof(ObjHeader *));
+
+    vm->stringClass = NULL;
+    vm->mapClass = NULL;
+    vm->rangeClass = NULL;
+    vm->listClass = NULL;
+    vm->nullClass = NULL;
+    vm->boolClass = NULL;
+    vm->numClass = NULL;
+    vm->fnClass = NULL;
+    vm->threadClass = NULL;
 }
 
 VM *newVM()
@@ -79,6 +90,10 @@ void freeVM(VM *vm)
     }
 
     vm->grays.grayObjects = DEALLOCATE(vm, vm->grays.grayObjects);
+    for (uint32_t i = 0; i < vm->allMethodNames.count; i++)
+        memManager(vm, vm->allMethodNames.datas[i].str,
+                   vm->allMethodNames.datas[i].length + 1, 0);
+
     StringBufferClear(vm, &vm->allMethodNames);
     DEALLOCATE(vm, vm);
 }
@@ -625,7 +640,7 @@ VMResult executeInstruction(VM *vm, register ObjThread *curThread)
     {
         // 指令流: 2字节的跳转正偏移量
         int16_t offset = READ_SHORT();
-        ASSERT(offset > 0, "OPCODE_JUMP`s operand must be positive!");
+        ASSERT(offset >= 0, "OPCODE_JUMP`s operand must be positive!");
         ip += offset;
         LOOP();
     }

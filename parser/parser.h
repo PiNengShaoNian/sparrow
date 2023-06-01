@@ -28,6 +28,9 @@ typedef enum
     TOKEN_CONTINUE, //'continue'
     TOKEN_RETURN,   //'return'
     TOKEN_NULL,     //'null'
+    TOKEN_SWITCH,   // 'switch'
+    TOKEN_CASE,     // 'case'
+    TOKEN_DEFAULT,  // 'default'
 
     // 以下是关于类和模块导入的token
     TOKEN_CLASS,  //'class'

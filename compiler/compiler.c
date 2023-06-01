@@ -42,6 +42,9 @@ struct compileUnit
 
   // 最后写入的一条指令的长度
   uint8_t lastInstructionLen;
+
+  // 用来判断当前是否处于一个switch中
+  bool inSwitch;
 }; // 编译单元
 
 typedef enum
@@ -141,6 +144,7 @@ static void initCompileUnit(Parser *parser, CompileUnit *cu,
   cu->curLoop = NULL;
   cu->enclosingClassBK = NULL;
   cu->lastInstructionLen = 0;
+  cu->inSwitch = false;
 
   // 若没有外层,说明当前属于模块作用域
   if (enclosingUint == NULL)
@@ -1679,6 +1683,9 @@ SymbolBindRule Rules[] = {
     /* TOKEN_CONTINUE */ UNUSED_RULE,
     /* TOKEN_RETURN */ UNUSED_RULE,
     /* TOKEN_NULL */ PREFIX_SYMBOL(null),
+    /* TOKEN_SWITCH */ UNUSED_RULE,
+    /* TOKEN_CASE */ UNUSED_RULE,
+    /* TOKEN_DEFAULT */ UNUSED_RULE,
     /* TOKEN_CLASS */ UNUSED_RULE,
     /* TOKEN_THIS */ PREFIX_SYMBOL(this),
     /* TOKEN_STATIC */ UNUSED_RULE,
@@ -2280,6 +2287,169 @@ static void compileForStatement(CompileUnit *cu)
   leaveScope(cu); // 离开变量"seq "和"iter "的作用域
 }
 
+// 将case代码块中的break语句的回填地址放到buf中
+static void findBreakInCaseBlock(CompileUnit *cu, uint32_t start,
+                                 uint32_t end, IntBuffer *buf)
+{
+  uint32_t idx = start;
+  while (idx < end)
+  {
+    // 回填循case代码块内所有可能的break语句
+    if (cu->fn->instrStream.datas[idx] == OPCODE_END)
+    {
+      cu->fn->instrStream.datas[idx] = OPCODE_JUMP;
+
+      // 记录下break语句的回填地址
+      // id+1是操作数的高字节,patchPlaceholder中会处理idx + 1和idx + 2
+      IntBufferAdd(cu->curParser->vm, buf, idx + 1);
+
+      // 使idx指向指令流中下一操作码
+      idx += 3;
+    }
+    else
+    {
+      // 为提高遍历速度,遇到不是OPCODE_END的指令,
+      // 一次跳过该指令及其操作数
+      idx += 1 + getBytesOfOperands(cu->fn->instrStream.datas,
+                                    cu->fn->constants.datas, idx);
+    }
+  }
+}
+
+// 编译switch语句
+static void compileSwitchStatement(CompileUnit *cu)
+{
+  /**
+   * switch(2) {
+   *   case 1: {
+   *     total += 1
+   *     break
+   *   }
+   *   case 2: {
+   *     total += 2
+   *     break
+   *   }
+   *   case 3: {
+   *     total += 3
+   *   }
+   *   default: {
+   *     total += 4
+   *   }
+   * }
+   * 会生成以下等价代码
+   * test1:
+   *   if(cond1 != 2) goto test2
+   *   total += 1
+   *   goto exit
+   *   goto fallthrough2
+   * test2:
+   *   if(cond2 != 2) goto test3
+   * fallthrough2:
+   *   total += 2
+   *   goto exit
+   *   goto fallthrough3
+   * test3:
+   *   if(cond3 != 2) goto test4
+   * fallthrough3:
+   *   total += 3
+   *   goto fallthrough4
+   * test4:
+   * fallthrough4:
+   *   total += 4
+   * exit:
+   */
+
+  consumeCurToken(cu->curParser,
+                  TOKEN_LEFT_PAREN, "expect '(' after switch!");
+  enterScope(cu);
+  expression(cu, BP_LOWEST);
+  uint32_t condSlot = addLocalVar(cu, "cond ", 5); // 声明一个变量来存储switch()中表达式的求值结果
+  consumeCurToken(cu->curParser,
+                  TOKEN_RIGHT_PAREN, "expect ')' after condition!");
+  consumeCurToken(cu->curParser,
+                  TOKEN_LEFT_BRACE, "expect '{' after condition!");
+
+  if (matchToken(cu->curParser, TOKEN_RIGHT_BRACE)) // 如果是空switch
+  {
+    leaveScope(cu);
+    return;
+  }
+  else if (matchToken(cu->curParser, TOKEN_DEFAULT)) // 最简单的形式，只有一个default分支
+  {
+    consumeCurToken(cu->curParser,
+                    TOKEN_COLON, "expect '{' after default!");
+    writeOpCode(cu, OPCODE_POP); // 弹出栈顶的condition
+    compileBlock(cu);
+  }
+  else if (matchToken(cu->curParser, TOKEN_CASE)) // 存在若干个switch分支
+  {
+    Signature equalsSign = {SIGN_METHOD, "==", 2, 1};
+    IntBuffer jmpToEnds; // 收集所有break语句的回填地址
+    IntBufferInit(&jmpToEnds);
+    cu->inSwitch = true;
+
+    writeOpCodeByteOperand(cu, OPCODE_LOAD_LOCAL_VAR, condSlot); // 将cond加载到栈中
+    expression(cu, BP_LOWEST);
+    emitCallBySignature(cu, &equalsSign, OPCODE_CALL0); // 判断是否相等
+    consumeCurToken(cu->curParser, TOKEN_COLON, "expect ':' after case condition!");
+
+    uint32_t falseBranch = emitInstrWithPlaceholder(cu, OPCODE_JUMP_IF_FALSE);
+    int idx = cu->fn->instrStream.count; // 记录下case的代码块的起始地址
+
+    compileStatement(cu);
+    // 在每个case代码块的最后添加上一条fallthrough最为代码块直接结束后的默认跳转地址
+    uint32_t fallthroughBranch = emitInstrWithPlaceholder(cu, OPCODE_JUMP);
+
+    int loopEndIndex = cu->fn->instrStream.count; // 记录下case的代码块的结束地址
+    findBreakInCaseBlock(cu, idx, loopEndIndex, &jmpToEnds);
+
+    while (matchToken(cu->curParser, TOKEN_CASE))
+    {
+      patchPlaceholder(cu, falseBranch);                           // 将本次的test地址回填到上一个case的失败跳转地址中
+      writeOpCodeByteOperand(cu, OPCODE_LOAD_LOCAL_VAR, condSlot); // 将cond加载到栈中
+      expression(cu, BP_LOWEST);
+      emitCallBySignature(cu, &equalsSign, OPCODE_CALL0); // 判断是否相等
+      consumeCurToken(cu->curParser, TOKEN_COLON, "expect ':' after case condition!");
+      falseBranch = emitInstrWithPlaceholder(cu, OPCODE_JUMP_IF_FALSE);
+      // 将本case的代码块起始地址，回填到上一个case的fallthrough跳转地址中
+      patchPlaceholder(cu, fallthroughBranch);
+      idx = cu->fn->instrStream.count; // 记录下case的代码块的起始地址
+      compileStatement(cu);
+      // 在每个case代码块的最后添加上一条fallthrough最为代码块直接结束后的默认跳转地址
+      fallthroughBranch = emitInstrWithPlaceholder(cu, OPCODE_JUMP);
+      loopEndIndex = cu->fn->instrStream.count; // 记录下case的代码块的结束地址
+
+      findBreakInCaseBlock(cu, idx, loopEndIndex, &jmpToEnds);
+    }
+
+    // 最后一个case的fallthrough和falseBranch都是default的起始地址,或者switch结束地址
+    patchPlaceholder(cu, fallthroughBranch);
+    patchPlaceholder(cu, falseBranch);
+
+    if (matchToken(cu->curParser, TOKEN_DEFAULT)) // 存在default语句
+    {
+      consumeCurToken(cu->curParser,
+                      TOKEN_COLON, "expect '{' after default!");
+      compileStatement(cu);
+    }
+
+    // 开始回填所有break的跳转地址
+    for (uint32_t i = 0; i < jmpToEnds.count; i++)
+      patchPlaceholder(cu, jmpToEnds.datas[i]);
+
+    IntBufferClear(cu->curParser->vm, &jmpToEnds);
+    cu->inSwitch = false;
+  }
+  else // 非法token
+  {
+    COMPILE_ERROR(cu->curParser, "expect 'case' or 'default' token!");
+  }
+
+  leaveScope(cu);
+  consumeCurToken(cu->curParser,
+                  TOKEN_RIGHT_BRACE, "expect '}' token!");
+}
+
 // 编译return
 inline static void compileReturn(CompileUnit *cu)
 {
@@ -2298,11 +2468,11 @@ inline static void compileReturn(CompileUnit *cu)
 // 编译break
 inline static void compileBreak(CompileUnit *cu)
 {
-  if (cu->curLoop == NULL)
-    COMPILE_ERROR(cu->curParser, "break should be used inside a loop!");
+  if (cu->curLoop == NULL && !cu->inSwitch)
+    COMPILE_ERROR(cu->curParser, "break should be used inside a loop or switch!");
 
   // 在退出循环体之前要丢掉循环体内的局部变量
-  discardLocalVar(cu, cu->curLoop->scopeDepth + 1);
+  discardLocalVar(cu, cu->inSwitch ? cu->scopeDepth : cu->curLoop->scopeDepth + 1);
 
   // 由于用OPCODE_END表示break占位, 此时无须记录占位符的返回地址
   emitInstrWithPlaceholder(cu, OPCODE_END);
@@ -2334,6 +2504,8 @@ static void compileStatement(CompileUnit *cu)
     compileWhileStatement(cu);
   else if (matchToken(cu->curParser, TOKEN_FOR))
     compileForStatement(cu);
+  else if (matchToken(cu->curParser, TOKEN_SWITCH))
+    compileSwitchStatement(cu);
   else if (matchToken(cu->curParser, TOKEN_RETURN))
     compileReturn(cu);
   else if (matchToken(cu->curParser, TOKEN_BREAK))

@@ -32,6 +32,9 @@ struct keywordToken keywordsToken[] = {
     {"this", 4, TOKEN_THIS},
     {"super", 5, TOKEN_SUPER},
     {"import", 6, TOKEN_IMPORT},
+    {"switch", 6, TOKEN_SWITCH},
+    {"case", 4, TOKEN_CASE},
+    {"default", 7, TOKEN_DEFAULT},
     {NULL, 0, TOKEN_UNKNOWN}};
 
 // 判断start是否为关键字并返回相应的token
