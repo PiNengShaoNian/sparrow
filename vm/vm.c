@@ -91,8 +91,7 @@ void freeVM(VM *vm)
 
     vm->grays.grayObjects = DEALLOCATE(vm, vm->grays.grayObjects);
     for (uint32_t i = 0; i < vm->allMethodNames.count; i++)
-        memManager(vm, vm->allMethodNames.datas[i].str,
-                   vm->allMethodNames.datas[i].length + 1, 0);
+        free(vm->allMethodNames.datas[i].str);
 
     StringBufferClear(vm, &vm->allMethodNames);
     DEALLOCATE(vm, vm);

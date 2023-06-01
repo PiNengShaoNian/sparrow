@@ -182,6 +182,7 @@ static Value importModule(VM *vm, Value moduleName)
   const char *sourceCode = readModule(objString->value.start);
 
   ObjThread *moduleThread = loadModule(vm, moduleName, sourceCode);
+  free((void *)sourceCode);
   return OBJ_TO_VALUE(moduleThread);
 }
 

@@ -23,6 +23,8 @@ static void runFile(const char *path)
   VM *vm = newVM();
   const char *sourceCode = readFile(path);
   executeModule(vm, OBJ_TO_VALUE(newObjString(vm, path, strlen(path))), sourceCode);
+  free((void *)sourceCode);
+  free(rootDir);
   freeVM(vm);
 }
 

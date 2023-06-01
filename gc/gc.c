@@ -366,6 +366,9 @@ void freeObject(VM *vm, ObjHeader *obj)
         DEALLOCATE(vm, ((ObjMap *)obj)->entries);
         break;
     case OT_MODULE:
+        for (uint32_t i = 0; i < ((ObjModule *)obj)->moduleVarName.count; i++)
+            DEALLOCATE(vm, ((ObjModule *)obj)->moduleVarName.datas[i].str);
+
         StringBufferClear(vm, &((ObjModule *)obj)->moduleVarName);
         ValueBufferClear(vm, &((ObjModule *)obj)->moduleVarValue);
         break;
