@@ -432,10 +432,16 @@ void getNextToken(Parser *parser)
         parser->curToken.type = TOKEN_ASSIGN;
       break;
     case '+':
-      parser->curToken.type = TOKEN_ADD;
+      if (matchNextChar(parser, '+'))
+        parser->curToken.type = TOKEN_ADD_ADD;
+      else
+        parser->curToken.type = TOKEN_ADD;
       break;
     case '-':
-      parser->curToken.type = TOKEN_SUB;
+      if (matchNextChar(parser, '-'))
+        parser->curToken.type = TOKEN_SUB_SUB;
+      else
+        parser->curToken.type = TOKEN_SUB;
       break;
     case '*':
       parser->curToken.type = TOKEN_MUL;

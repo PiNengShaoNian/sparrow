@@ -428,6 +428,15 @@ VMResult executeInstruction(VM *vm, register ObjThread *curThread)
     case OPCODE_PUSH_TRUE:
         PUSH(VT_TO_VALUE(VT_TRUE));
         LOOP();
+    case OPCODE_LOAD1:
+        PUSH(NUM_TO_VALUE(1));
+        LOOP();
+    case OPCODE_DUP1:
+    {
+        Value value = PEEK();
+        PUSH(value);
+        LOOP();
+    }
     case OPCODE_STORE_LOCAL_VAR:
         // 栈顶: 局部变量值
         // 指令流: 1字节的局部变量索引

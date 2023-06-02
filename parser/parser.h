@@ -59,6 +59,10 @@ typedef enum
     TOKEN_DIV, //'/'
     TOKEN_MOD, //'%'
 
+    // 后缀运算符
+    TOKEN_ADD_ADD, // '++'
+    TOKEN_SUB_SUB, // '--'
+
     // 赋值运算符
     TOKEN_ASSIGN, //'='
 

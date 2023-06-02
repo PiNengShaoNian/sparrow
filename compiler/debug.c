@@ -189,6 +189,12 @@ static int dumpOneInstruction(VM *vm, ObjFn *fn, int i, int *lastLine)
   case OPCODE_POP:
     printf("POP\n");
     break;
+  case OPCODE_LOAD1:
+    printf("LOAD1\n");
+    break;
+  case OPCODE_DUP1:
+    printf("DUP1\n");
+    break;
 
   case OPCODE_CALL0:
   case OPCODE_CALL1:

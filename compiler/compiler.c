@@ -40,9 +40,6 @@ struct compileUnit
   // 当前parser
   Parser *curParser;
 
-  // 最后写入的一条指令的长度
-  uint8_t lastInstructionLen;
-
   // 用来判断当前是否处于一个switch中
   bool inSwitch;
 }; // 编译单元
@@ -143,7 +140,6 @@ static void initCompileUnit(Parser *parser, CompileUnit *cu,
   cu->enclosingUnit = enclosingUint;
   cu->curLoop = NULL;
   cu->enclosingClassBK = NULL;
-  cu->lastInstructionLen = 0;
   cu->inSwitch = false;
 
   // 若没有外层,说明当前属于模块作用域
@@ -225,7 +221,6 @@ inline static void writeShortOperand(CompileUnit *cu, int operand)
 // 写入操作数为1字节大小的指令
 static int writeOpCodeByteOperand(CompileUnit *cu, OpCode opCode, int operand)
 {
-  cu->lastInstructionLen = 2;
   writeOpCode(cu, opCode);
   return writeByteOperand(cu, operand);
 }
@@ -233,30 +228,8 @@ static int writeOpCodeByteOperand(CompileUnit *cu, OpCode opCode, int operand)
 // 写入操作数为2字节大小的指令
 static void writeOpCodeShortOperand(CompileUnit *cu, OpCode opCode, int operand)
 {
-  cu->lastInstructionLen = 3;
   writeOpCode(cu, opCode);
   writeShortOperand(cu, operand);
-}
-
-// 复制一条位于最后的指令
-static void dupLastInstruction(CompileUnit *cu)
-{
-  int len = cu->lastInstructionLen;
-  int instrCount = cu->fn->instrStream.count;
-  Byte *instructions = cu->fn->instrStream.datas;
-  switch (len)
-  {
-  case 2:
-    writeOpCodeByteOperand(cu, instructions[instrCount - 2],
-                           instructions[instrCount - 1]);
-    break;
-  case 3:
-    writeOpCodeShortOperand(cu, instructions[instrCount - 3],
-                            instructions[instrCount - 2] << 8 | instructions[instrCount - 1]);
-    break;
-  default:
-    NOT_REACHED();
-  }
 }
 
 // 在模块objModule中定义名为name,值为value的模块变量
@@ -923,6 +896,29 @@ static void emitLoadOrStoreVariable(CompileUnit *cu, bool canAssign, Variable va
     expression(cu, BP_LOWEST);  // 计算'='右边表达式的值
     emitStoreVariable(cu, var); // 为var生成赋值指令
   }
+  else if (matchToken(cu->curParser, TOKEN_ADD_ADD) || matchToken(cu->curParser, TOKEN_SUB_SUB))
+  {
+    /**
+     * i++ 会生成         Load i
+     *                   Dup1
+     *                   Load1
+     *                   Call i.+(_)
+     *                   Store i
+     *                   Pop
+     */
+    Signature sign = {SIGN_METHOD, NULL, 1, 1};
+    if (cu->curParser->preToken.type == TOKEN_ADD_ADD)
+      sign.name = "+";
+    else
+      sign.name = "-";
+
+    emitLoadVariable(cu, var);                    // Load i
+    writeOpCode(cu, OPCODE_DUP1);                 // Dup1
+    writeOpCode(cu, OPCODE_LOAD1);                // Load1
+    emitCallBySignature(cu, &sign, OPCODE_CALL0); // Call i.+(_)
+    emitStoreVariable(cu, var);                   // Store i
+    writeOpCode(cu, OPCODE_POP);                  // 弹出栈顶的i+1, 次栈顶就是我们需要的i
+  }
   else if (canAssign && Rules[cu->curParser->curToken.type].assign &&
            matchLookAHeadToken(cu->curParser, TOKEN_ASSIGN)) // +=,-=
   {
@@ -1195,12 +1191,37 @@ static void emitMethodCall(CompileUnit *cu, const char *name,
 
     emitCallBySignature(cu, &fieldSign, opCode);
   }
+  else if (matchToken(cu->curParser, TOKEN_ADD_ADD) || matchToken(cu->curParser, TOKEN_SUB_SUB))
+  {
+    /**
+     * a.x++ 会生成   Load a
+     *               Dup1          # 复制一遍a防止它出栈，应为待会写回还要用到它
+     *               Call a.x      # 调用x的getter函数
+     *               Load1
+     *               Call x.+(_)   # 计算 a.x + 1
+     *               Call a.x=(_)  # 调用x的setter函数
+     *               Load1
+     *               Call x.-(_)   # 之前栈顶的值为x + 1要再减去1后才是结果
+     */
+    writeOpCode(cu, OPCODE_DUP1);                 // Dup1
+    emitGetterMethodCall(cu, &fieldSign, opCode); // Call a.x
+    writeOpCode(cu, OPCODE_LOAD1);                // Load1
+    // 生成+方法调用指令
+    Signature opSign = {SIGN_METHOD, cu->curParser->preToken.type == TOKEN_ADD_ADD ? "+" : "-", 1, 1};
+    emitCallBySignature(cu, &opSign, OPCODE_CALL0); // Call x.+(_)
+    fieldSign.type = SIGN_SETTER;
+    fieldSign.argNum = 1;                              // setter只接受一个参数
+    emitCallBySignature(cu, &fieldSign, OPCODE_CALL0); // Call   a.x=(_)
+    writeOpCode(cu, OPCODE_LOAD1);
+    opSign.name = cu->curParser->preToken.type == TOKEN_ADD_ADD ? "-" : "+";
+    emitCallBySignature(cu, &opSign, OPCODE_CALL0);
+  }
   else if (canAssign && Rules[cu->curParser->curToken.type].assign &&
            matchLookAHeadToken(cu->curParser, TOKEN_ASSIGN)) // +=,-=
   {
     /**
      * a.x += b 会生成    Load   a
-     *                   Load   a
+     *                   Dup1
      *                   Call   a.x   # 调用x的getter函数
      *                   Load   b
      *                   Call   x.+   # 把a.x和b加起来
@@ -1211,7 +1232,7 @@ static void emitMethodCall(CompileUnit *cu, const char *name,
     getNextToken(cu->curParser);
     getNextToken(cu->curParser);
     // 先前已经Load a,在这里我们dup最后一条指令, 也就是再Load一次a
-    dupLastInstruction(cu);                       // Load a
+    writeOpCode(cu, OPCODE_DUP1);
     emitGetterMethodCall(cu, &fieldSign, opCode); // Call a.x
     expression(cu, BP_LOWEST);                    // Load b
     // 生成+方法调用指令
@@ -1707,6 +1728,8 @@ SymbolBindRule Rules[] = {
     /* TOKEN_MUL */ INFIX_OPERATOR("*", BP_FACTOR, true),
     /* TOKEN_DIV */ INFIX_OPERATOR("/", BP_FACTOR, true),
     /* TOKEN_MOD */ INFIX_OPERATOR("%", BP_FACTOR, true),
+    /* TOKEN_ADD_ADD */ UNUSED_RULE,
+    /* TOKEN_SUB_SUB */ UNUSED_RULE,
     /* TOKEN_ASSIGN */ UNUSED_RULE,
     /* TOKEN_BIT_AND */ INFIX_OPERATOR("&", BP_BIT_AND, true),
     /* TOKEN_BIT_OR */ INFIX_OPERATOR("|", BP_BIT_OR, true),
@@ -1920,12 +1943,11 @@ static void compileVarDefinition(CompileUnit *cu, Variable classVar, bool isStat
           COMPILE_ERROR(cu->curParser,
                         "instance field '%s' redefinition!", id);
         }
-
-        if (matchToken(cu->curParser, TOKEN_ASSIGN))
-        {
-          COMPILE_ERROR(cu->curParser,
-                        "instance field isn`t allowed initialization!");
-        }
+      }
+      if (matchToken(cu->curParser, TOKEN_ASSIGN))
+      {
+        COMPILE_ERROR(cu->curParser,
+                      "instance field isn`t allowed initialization!");
       }
     }
     return;
@@ -2058,6 +2080,8 @@ uint32_t getBytesOfOperands(Byte *instrStream,
   case OPCODE_PUSH_FALSE:
   case OPCODE_PUSH_TRUE:
   case OPCODE_POP:
+  case OPCODE_LOAD1:
+  case OPCODE_DUP1:
     return 0;
 
   case OPCODE_CREATE_CLASS:
