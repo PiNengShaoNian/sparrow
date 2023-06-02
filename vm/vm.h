@@ -38,7 +38,7 @@ typedef struct
 typedef struct
 {
     // 堆增长因子
-    int heapGrowthFactor;
+    double heapGrowthFactor;
 
     // 初始堆大小,默认为10MB
     uint32_t initialHeapSize;
