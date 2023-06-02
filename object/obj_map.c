@@ -23,7 +23,7 @@ static uint32_t hashNum(double num)
 }
 
 // 计算对象的哈希码
-static uint32_t hashObj(VM *vm, ObjHeader *objHeader)
+static uint32_t hashObj(UNUSED VM *vm, ObjHeader *objHeader)
 {
     switch (objHeader->type)
     {
@@ -38,10 +38,12 @@ static uint32_t hashObj(VM *vm, ObjHeader *objHeader)
     case OT_STRING:
         return ((ObjString *)objHeader)->hashCode;
     default:
-        RUN_ERROR(vm->curThread, "the hashable are objstring, objrange and class.");
+    {
+        Bits64 bits64;
+        bits64.bits64 = (uint64_t)objHeader;
+        return hashNum(bits64.num);
     }
-
-    return 0;
+    }
 }
 
 // 根据value的类型调用相应的哈希函数

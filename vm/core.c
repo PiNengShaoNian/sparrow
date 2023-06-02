@@ -323,9 +323,7 @@ static bool validateKey(VM *vm, Value arg)
       VALUE_IS_FALSE(arg) ||
       VALUE_IS_NULL(arg) ||
       VALUE_IS_NUM(arg) ||
-      VALUE_IS_OBJSTR(arg) ||
-      VALUE_IS_OBJRANGE(arg) ||
-      VALUE_IS_CLASS(arg))
+      VALUE_IS_OBJ(arg))
     return true;
 
   SET_ERROR_FALSE(vm, "key must be value type!");
