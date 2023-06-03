@@ -193,8 +193,26 @@ static int dumpOneInstruction(VM *vm, ObjFn *fn, int i, int *lastLine)
     printf("LOAD1\n");
     break;
   case OPCODE_DUP1:
-    printf("DUP1\n");
+  case OPCODE_DUP2:
+  case OPCODE_DUP3:
+  case OPCODE_DUP4:
+  case OPCODE_DUP5:
+  case OPCODE_DUP6:
+  case OPCODE_DUP7:
+  case OPCODE_DUP8:
+  case OPCODE_DUP9:
+  case OPCODE_DUP10:
+  case OPCODE_DUP11:
+  case OPCODE_DUP12:
+  case OPCODE_DUP13:
+  case OPCODE_DUP14:
+  case OPCODE_DUP15:
+  case OPCODE_DUP16:
+  {
+    int n = bytecode[i - 1] - OPCODE_DUP1 + 1;
+    printf("DUP%d\n", n);
     break;
+  }
 
   case OPCODE_CALL0:
   case OPCODE_CALL1:

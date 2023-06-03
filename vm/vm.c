@@ -432,9 +432,29 @@ VMResult executeInstruction(VM *vm, register ObjThread *curThread)
         PUSH(NUM_TO_VALUE(1));
         LOOP();
     case OPCODE_DUP1:
+    case OPCODE_DUP2:
+    case OPCODE_DUP3:
+    case OPCODE_DUP4:
+    case OPCODE_DUP5:
+    case OPCODE_DUP6:
+    case OPCODE_DUP7:
+    case OPCODE_DUP8:
+    case OPCODE_DUP9:
+    case OPCODE_DUP10:
+    case OPCODE_DUP11:
+    case OPCODE_DUP12:
+    case OPCODE_DUP13:
+    case OPCODE_DUP14:
+    case OPCODE_DUP15:
+    case OPCODE_DUP16:
     {
-        Value value = PEEK();
-        PUSH(value);
+        int dupN = opCode - OPCODE_DUP1 + 1;
+        Value *top = curThread->esp;
+        for (int i = dupN; i > 0; i--)
+        {
+            Value value = (*(top - i));
+            PUSH(value);
+        }
         LOOP();
     }
     case OPCODE_STORE_LOCAL_VAR:

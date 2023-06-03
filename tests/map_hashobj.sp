@@ -11,7 +11,7 @@ class ReactiveEffect {
   }
 
   run() {
-    fn.call()
+    fn()
   }
 
   stop() {

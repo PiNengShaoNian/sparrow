@@ -47,10 +47,12 @@ struct compileUnit
 typedef enum
 {
   VAR_SCOPE_INVALID,
-  VAR_SCOPE_LOCAL,   // 局部变量
-  VAR_SCOPE_UPVALUE, // upvalue
-  VAR_SCOPE_MODULE   // 模块变量
-} VarScopeType;      // 标识变量作用域
+  VAR_SCOPE_LOCAL,          // 局部变量
+  VAR_SCOPE_UPVALUE,        // upvalue
+  VAR_SCOPE_MODULE,         // 模块变量
+  VAR_SCOPE_INSTANCE_FIELD, // 实例字段
+  VAR_SCOPE_STATIC_FIELD    // 静态字段
+} VarScopeType;             // 标识变量作用域
 
 typedef struct
 {
@@ -130,6 +132,7 @@ static void compileStatement(CompileUnit *cu);
 static int declareMethod(CompileUnit *cu, char *signStr, uint32_t length);
 static void defineMethod(CompileUnit *cu,
                          Variable classVar, bool isStatic, int methodIndex);
+static void emitLoadThis(CompileUnit *cu);
 
 // 初始化CompileUnit
 static void initCompileUnit(Parser *parser, CompileUnit *cu,
@@ -860,6 +863,17 @@ static void emitLoadVariable(CompileUnit *cu, Variable var)
     // 生成加载模块变量到栈的指令
     writeOpCodeShortOperand(cu, OPCODE_LOAD_MODULE_VAR, var.index);
     break;
+  case VAR_SCOPE_INSTANCE_FIELD:
+    if (cu->enclosingUnit != NULL)
+    {
+      writeOpCodeByteOperand(cu, OPCODE_LOAD_THIS_FIELD, var.index);
+    }
+    else
+    {
+      emitLoadThis(cu);
+      writeOpCodeByteOperand(cu, OPCODE_LOAD_FIELD, var.index);
+    }
+    break;
   default:
     NOT_REACHED();
   }
@@ -882,68 +896,23 @@ static void emitStoreVariable(CompileUnit *cu, Variable var)
     // 生成存储模块变量的指令
     writeOpCodeShortOperand(cu, OPCODE_STORE_MODULE_VAR, var.index);
     break;
+  case VAR_SCOPE_INSTANCE_FIELD:
+    if (cu->enclosingUnit != NULL)
+    {
+      writeOpCodeByteOperand(cu, OPCODE_STORE_THIS_FIELD, var.index);
+    }
+    else
+    {
+      emitLoadThis(cu);
+      writeOpCodeByteOperand(cu, OPCODE_STORE_FIELD, var.index);
+    }
+    break;
   default:
     NOT_REACHED();
   }
 }
 
 extern SymbolBindRule Rules[];
-// 生成加载或存储变量的指令
-static void emitLoadOrStoreVariable(CompileUnit *cu, bool canAssign, Variable var)
-{
-  if (canAssign && matchToken(cu->curParser, TOKEN_ASSIGN))
-  {
-    expression(cu, BP_LOWEST);  // 计算'='右边表达式的值
-    emitStoreVariable(cu, var); // 为var生成赋值指令
-  }
-  else if (matchToken(cu->curParser, TOKEN_ADD_ADD) || matchToken(cu->curParser, TOKEN_SUB_SUB))
-  {
-    /**
-     * i++ 会生成         Load i
-     *                   Dup1
-     *                   Load1
-     *                   Call i.+(_)
-     *                   Store i
-     *                   Pop
-     */
-    Signature sign = {SIGN_METHOD, NULL, 1, 1};
-    if (cu->curParser->preToken.type == TOKEN_ADD_ADD)
-      sign.name = "+";
-    else
-      sign.name = "-";
-
-    emitLoadVariable(cu, var);                    // Load i
-    writeOpCode(cu, OPCODE_DUP1);                 // Dup1
-    writeOpCode(cu, OPCODE_LOAD1);                // Load1
-    emitCallBySignature(cu, &sign, OPCODE_CALL0); // Call i.+(_)
-    emitStoreVariable(cu, var);                   // Store i
-    writeOpCode(cu, OPCODE_POP);                  // 弹出栈顶的i+1, 次栈顶就是我们需要的i
-  }
-  else if (canAssign && Rules[cu->curParser->curToken.type].assign &&
-           matchLookAHeadToken(cu->curParser, TOKEN_ASSIGN)) // +=,-=
-  {
-    /**
-     * a += b 会生成      Load   a
-     *                   Load   b
-     *                   Call   a.+
-     *                   Store  a
-     */
-    Token opToken = cu->curParser->curToken;
-    // 消费掉+和=
-    getNextToken(cu->curParser);
-    getNextToken(cu->curParser);
-    emitLoadVariable(cu, var); // Load a
-    expression(cu, BP_LOWEST); // Load b
-    // 生成方法调用指令
-    Signature sign = {SIGN_METHOD, opToken.start, opToken.length, 1};
-    emitCallBySignature(cu, &sign, OPCODE_CALL0); // Call a.+
-    emitStoreVariable(cu, var);                   // Store a
-  }
-  else
-  {
-    emitLoadVariable(cu, var); // 为var生成读取指令
-  }
-}
 
 // 生成把实例对象this加载到栈的指令
 static void emitLoadThis(CompileUnit *cu)
@@ -1336,6 +1305,103 @@ static void listLiteral(CompileUnit *cu, UNUSED bool canAssign)
   consumeCurToken(cu->curParser, TOKEN_RIGHT_BRACKET, "expect ']' after list element!");
 }
 
+static void compileSubscriptSuffix(CompileUnit *cu, Signature *sign, bool canAssign)
+{
+  // 若是[_]=(_),即subscript setter
+  if (canAssign && matchToken(cu->curParser, TOKEN_ASSIGN))
+  {
+    sign->type = SIGN_SUBSCRIPT_SETTER;
+
+    //=右边的值也算一个参数,签名是[args[1]]=(args[2])
+    if (++sign->argNum > MAX_ARG_NUM)
+      COMPILE_ERROR(cu->curParser, "the max number of argument is %d!", MAX_ARG_NUM);
+
+    // 获取=右边的表达式
+    expression(cu, BP_LOWEST);
+
+    emitCallBySignature(cu, sign, OPCODE_CALL0);
+  }
+  // 后缀为自增或者自减
+  else if (matchToken(cu->curParser, TOKEN_ADD_ADD) || matchToken(cu->curParser, TOKEN_SUB_SUB))
+  {
+    /**
+     * a[i]++ 会生成      Dup_2             # 将a和i这两个在栈顶的值复制一遍待会写回还会再用到
+     *                   call a.[_]         # 取出a的第i个元素
+     *                   Load1              # 将1放到栈上
+     *                   Call a[i].+(_)     # 计算a[i] + 1的值
+     *                   Call a.[_]=(_)     # 将a[i] + 1的结果写回a[i]
+     *                   Call a[i].-(_)     # 将栈顶的a[i] + 1在减去1，就是我们要的自加之前的a[i]值
+     */
+    writeOpCode(cu, OPCODE_DUP1 + sign->argNum); // Dup_2
+    sign->type = SIGN_SUBSCRIPT;
+    emitCallBySignature(cu, sign, OPCODE_CALL0); // call a.[_]
+    writeOpCode(cu, OPCODE_LOAD1);               // Load1
+    Signature opSign = {SIGN_METHOD, NULL, 1, 1};
+    if (cu->curParser->preToken.type == TOKEN_ADD_ADD)
+      opSign.name = "+";
+    else
+      opSign.name = "-";
+    emitCallBySignature(cu, &opSign, OPCODE_CALL0); // Call a[i].+(_)
+    sign->type = SIGN_SUBSCRIPT_SETTER;
+    if (++sign->argNum > MAX_ARG_NUM) // 实际的参数数量需要加上要写回的操作数
+      COMPILE_ERROR(cu->curParser, "the max number of argument is %d!", MAX_ARG_NUM);
+    emitCallBySignature(cu, sign, OPCODE_CALL0); // Call a.[_]=(_)
+    opSign.name = cu->curParser->preToken.type == TOKEN_ADD_ADD ? "-" : "+";
+    writeOpCode(cu, OPCODE_LOAD1);
+    emitCallBySignature(cu, &opSign, OPCODE_CALL0); // Call a[i].-(_)
+  }
+  //  +=,-=
+  else if (canAssign && Rules[cu->curParser->curToken.type].assign &&
+           matchLookAHeadToken(cu->curParser, TOKEN_ASSIGN))
+  {
+    /**
+     * a[i] += b 会生成    Dup_2               # 将a和i这两个在栈顶的值复制一遍待会写回还会再用到
+     *                    Call a.[_]           # 取出a的第i个元素
+     *                    Load b               # 将b加载到栈上
+     *                    Call a[i].+(_)       # 计算a[i] + b的值
+     *                    Call a.[_]=(_)       # 写回,调用该函数后它会会将该字段的最新值放在栈顶, 所以我们不用显式往栈放值
+     */
+    Token opToken = cu->curParser->curToken;
+    // 消费掉+和=
+    getNextToken(cu->curParser);
+    getNextToken(cu->curParser);
+    writeOpCode(cu, OPCODE_DUP1 + sign->argNum); // Dup_2
+    emitCallBySignature(cu, sign, OPCODE_CALL0); // call a.[_]
+    expression(cu, BP_LOWEST);                   // Load b
+    // 生成方法调用指令
+    Signature opSign = {SIGN_METHOD, opToken.start, opToken.length, 1};
+    emitCallBySignature(cu, &opSign, OPCODE_CALL0); // Call a[i].+(_)
+    sign->type = SIGN_SUBSCRIPT_SETTER;
+    if (++sign->argNum > MAX_ARG_NUM) // 实际的参数数量需要加上要写回的操作数
+      COMPILE_ERROR(cu->curParser, "the max number of argument is %d!", MAX_ARG_NUM);
+    emitCallBySignature(cu, sign, OPCODE_CALL0); // Call a.[_]=(_)
+  }
+  else if (matchToken(cu->curParser, TOKEN_LEFT_PAREN)) // 后缀为函数调用
+  {
+    /**
+     * a[i](x) 会生成  Call a.[_]           # 取出a的第i个元素
+     *                 Load x               # 将参数放到栈上
+     *                 Call a[i].call(_)    # 调用函数对象的call方法
+     */
+    emitCallBySignature(cu, sign, OPCODE_CALL0); // call a.[_]
+    Signature callSign = {SIGN_METHOD, "call", 4, 0};
+    // 若后面不是')',说明有参数列表
+    if (!matchToken(cu->curParser, TOKEN_RIGHT_PAREN))
+    {
+      // 2 压入实参
+      processArgList(cu, &callSign);
+      consumeCurToken(cu->curParser, TOKEN_RIGHT_PAREN,
+                      "expect ')' after argument list!");
+    }
+    // 3 生成调用指令以调用函数
+    emitCallBySignature(cu, &callSign, OPCODE_CALL0);
+  }
+  else // 没有后缀将a[i]加载进栈中即可
+  {
+    emitCallBySignature(cu, sign, OPCODE_CALL0); // call a.[_]
+  }
+}
+
 //'['.led()  用于索引list元素,如list[x]
 static void subscript(CompileUnit *cu, bool canAssign)
 {
@@ -1351,19 +1417,7 @@ static void subscript(CompileUnit *cu, bool canAssign)
   consumeCurToken(cu->curParser,
                   TOKEN_RIGHT_BRACKET, "expect ']' after argument list!");
 
-  // 若是[_]=(_),即subscript setter
-  if (canAssign && matchToken(cu->curParser, TOKEN_ASSIGN))
-  {
-    sign.type = SIGN_SUBSCRIPT_SETTER;
-
-    //=右边的值也算一个参数,签名是[args[1]]=(args[2])
-    if (++sign.argNum > MAX_ARG_NUM)
-      COMPILE_ERROR(cu->curParser, "the max number of argument is %d!", MAX_ARG_NUM);
-
-    // 获取=右边的表达式
-    expression(cu, BP_LOWEST);
-  }
-  emitCallBySignature(cu, &sign, OPCODE_CALL0);
+  compileSubscriptSuffix(cu, &sign, canAssign);
 }
 
 // 为下标操作符'['编译签名
@@ -1467,6 +1521,80 @@ static void null(CompileUnit *cu, bool canAssign UNUSED)
   writeOpCode(cu, OPCODE_PUSH_NULL);
 }
 
+// 编译id的后缀即在i++,fun(),a = x中++,(),和=x
+static void compileIdSuffix(CompileUnit *cu, bool canAssign, Variable var)
+{
+  if (canAssign && matchToken(cu->curParser, TOKEN_ASSIGN)) // 后缀为赋值表达式
+  {
+    expression(cu, BP_LOWEST);  // 计算'='右边表达式的值
+    emitStoreVariable(cu, var); // 为var生成赋值指令
+  }
+  // 后缀为自增或者自减
+  else if (matchToken(cu->curParser, TOKEN_ADD_ADD) || matchToken(cu->curParser, TOKEN_SUB_SUB))
+  {
+    /**
+     * i++ 会生成         Load i
+     *                   Dup1
+     *                   Load1
+     *                   Call i.+(_)
+     *                   Store i
+     *                   Pop
+     */
+    Signature sign = {SIGN_METHOD, NULL, 1, 1};
+    if (cu->curParser->preToken.type == TOKEN_ADD_ADD)
+      sign.name = "+";
+    else
+      sign.name = "-";
+
+    emitLoadVariable(cu, var);                    // Load i
+    writeOpCode(cu, OPCODE_DUP1);                 // Dup1
+    writeOpCode(cu, OPCODE_LOAD1);                // Load1
+    emitCallBySignature(cu, &sign, OPCODE_CALL0); // Call i.+(_)
+    emitStoreVariable(cu, var);                   // Store i
+    writeOpCode(cu, OPCODE_POP);                  // 弹出栈顶的i+1, 次栈顶就是我们需要的i
+  }
+  //  +=,-=
+  else if (canAssign && Rules[cu->curParser->curToken.type].assign &&
+           matchLookAHeadToken(cu->curParser, TOKEN_ASSIGN))
+  {
+    /**
+     * a += b 会生成      Load   a
+     *                   Load   b
+     *                   Call   a.+
+     *                   Store  a
+     */
+    Token opToken = cu->curParser->curToken;
+    // 消费掉+和=
+    getNextToken(cu->curParser);
+    getNextToken(cu->curParser);
+    emitLoadVariable(cu, var); // Load a
+    expression(cu, BP_LOWEST); // Load b
+    // 生成方法调用指令
+    Signature sign = {SIGN_METHOD, opToken.start, opToken.length, 1};
+    emitCallBySignature(cu, &sign, OPCODE_CALL0); // Call a.+
+    emitStoreVariable(cu, var);                   // Store a
+  }
+  else if (matchToken(cu->curParser, TOKEN_LEFT_PAREN)) // 后缀为函数调用
+  {
+    emitLoadVariable(cu, var);
+    Signature sign = {SIGN_METHOD, "call", 4, 0};
+    // 若后面不是')',说明有参数列表
+    if (!matchToken(cu->curParser, TOKEN_RIGHT_PAREN))
+    {
+      // 2 压入实参
+      processArgList(cu, &sign);
+      consumeCurToken(cu->curParser, TOKEN_RIGHT_PAREN,
+                      "expect ')' after argument list!");
+    }
+    // 3 生成调用指令以调用函数
+    emitCallBySignature(cu, &sign, OPCODE_CALL0);
+  }
+  else
+  {
+    emitLoadVariable(cu, var);
+  }
+}
+
 // 小写字符开头便是局部变量
 static bool isLocalName(const char *name)
 {
@@ -1484,7 +1612,7 @@ static void id(CompileUnit *cu, bool canAssign)
   // 函数调用->局部变量和upvalue->实例域->静态域->类getter方法调用->模块变量
 
   // 处理全局作用域的函数调用(需要单独处理,在全局作用域中不允许先调用后定义)
-  if (cu->enclosingUnit == NULL && matchToken(cu->curParser, TOKEN_LEFT_PAREN))
+  if (cu->enclosingUnit == NULL && cu->curParser->curToken.type == TOKEN_LEFT_PAREN)
   {
     char id[MAX_ID_LEN] = {'\0'};
 
@@ -1502,30 +1630,7 @@ static void id(CompileUnit *cu, bool canAssign)
       COMPILE_ERROR(cu->curParser, "Undefined function: '%s'!", id);
     }
 
-    // 1 把模块变量即函数闭包加载到栈
-    emitLoadVariable(cu, var);
-
-    Signature sign;
-    // 函数调用的形式和method类似,
-    // 只不过method有一个可选的块参数
-    sign.type = SIGN_METHOD;
-
-    // 把函数调用编译为"闭包.call"的形式,故name为call
-    sign.name = "call";
-    sign.length = 4;
-    sign.argNum = 0;
-
-    // 若后面不是')',说明有参数列表
-    if (!matchToken(cu->curParser, TOKEN_RIGHT_PAREN))
-    {
-      // 2 压入实参
-      processArgList(cu, &sign);
-      consumeCurToken(cu->curParser, TOKEN_RIGHT_PAREN,
-                      "expect ')' after argument list!");
-    }
-
-    // 3 生成调用指令以调用函数
-    emitCallBySignature(cu, &sign, OPCODE_CALL0);
+    compileIdSuffix(cu, canAssign, var);
   }
   else // 否则按照各种变量来处理
   {
@@ -1533,16 +1638,7 @@ static void id(CompileUnit *cu, bool canAssign)
     Variable var = getVarFromLocalOrUpvalue(cu, name.start, name.length);
     if (var.index != -1)
     {
-      if (cu->curParser->curToken.type == TOKEN_LEFT_PAREN)
-      {
-        emitLoadVariable(cu, var); // 为var生成读取指令
-        emitMethodCall(cu, "call", 4, OPCODE_CALL0, false);
-      }
-      else
-      {
-        emitLoadOrStoreVariable(cu, canAssign, var);
-      }
-
+      compileIdSuffix(cu, canAssign, var);
       return;
     }
 
@@ -1551,29 +1647,12 @@ static void id(CompileUnit *cu, bool canAssign)
     {
       int fieldIndex = getIndexFromSymbolTable(&classBK->fields,
                                                name.start, name.length);
+
       if (fieldIndex != -1)
       {
-        bool isRead = true;
-        if (canAssign && matchToken(cu->curParser, TOKEN_ASSIGN))
-        {
-          isRead = false;
-          expression(cu, BP_LOWEST);
-        }
+        Variable var = {VAR_SCOPE_INSTANCE_FIELD, fieldIndex};
 
-        // 如果当前正在编译类方法,则直接在该实例对象中加载field
-        if (cu->enclosingUnit != NULL)
-        {
-          writeOpCodeByteOperand(cu,
-                                 isRead ? OPCODE_LOAD_THIS_FIELD
-                                        : OPCODE_STORE_THIS_FIELD,
-                                 fieldIndex);
-        }
-        else
-        {
-          emitLoadThis(cu);
-          writeOpCodeByteOperand(cu,
-                                 isRead ? OPCODE_LOAD_FIELD : OPCODE_STORE_FIELD, fieldIndex);
-        }
+        compileIdSuffix(cu, canAssign, var);
         return;
       }
     }
@@ -1600,7 +1679,7 @@ static void id(CompileUnit *cu, bool canAssign)
       DEALLOCATE_ARRAY(cu->curParser->vm, staticFieldId, MAX_ID_LEN);
       if (var.index != -1)
       {
-        emitLoadOrStoreVariable(cu, canAssign, var);
+        compileIdSuffix(cu, canAssign, var);
         return;
       }
     }
@@ -1639,14 +1718,7 @@ static void id(CompileUnit *cu, bool canAssign)
       }
     }
 
-    if (cu->curParser->curToken.type == TOKEN_LEFT_PAREN)
-    {
-      emitLoadVariable(cu, var);
-      emitMethodCall(cu, "call", 4, OPCODE_CALL0, false);
-      return;
-    }
-
-    emitLoadOrStoreVariable(cu, canAssign, var);
+    compileIdSuffix(cu, canAssign, var);
   }
 }
 
