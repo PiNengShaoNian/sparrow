@@ -129,7 +129,7 @@ static void emitMethodCall(CompileUnit *cu, const char *name,
                            uint32_t length, OpCode opCode, bool canAssign);
 static void unaryOperator(CompileUnit *cu, UNUSED bool canAssign);
 static void compileStatement(CompileUnit *cu);
-static int declareMethod(CompileUnit *cu, char *signStr, uint32_t length);
+static int declareMethod(CompileUnit *cu, char *signStr, uint32_t length, bool isDefault);
 static void defineMethod(CompileUnit *cu,
                          Variable classVar, bool isStatic, int methodIndex);
 static void emitLoadThis(CompileUnit *cu);
@@ -1376,7 +1376,7 @@ static void compileSubscriptSuffix(CompileUnit *cu, Signature *sign, bool canAss
       COMPILE_ERROR(cu->curParser, "the max number of argument is %d!", MAX_ARG_NUM);
     emitCallBySignature(cu, sign, OPCODE_CALL0); // Call a.[_]=(_)
   }
-  else if (matchToken(cu->curParser, TOKEN_LEFT_PAREN)) // 后缀为函数调用
+  else if (cu->curParser->curToken.type == TOKEN_LEFT_PAREN) // 后缀为函数调用
   {
     /**
      * a[i](x) 会生成  Call a.[_]           # 取出a的第i个元素
@@ -1385,16 +1385,20 @@ static void compileSubscriptSuffix(CompileUnit *cu, Signature *sign, bool canAss
      */
     emitCallBySignature(cu, sign, OPCODE_CALL0); // call a.[_]
     Signature callSign = {SIGN_METHOD, "call", 4, 0};
-    // 若后面不是')',说明有参数列表
-    if (!matchToken(cu->curParser, TOKEN_RIGHT_PAREN))
+
+    while (matchToken(cu->curParser, TOKEN_LEFT_PAREN))
     {
-      // 2 压入实参
-      processArgList(cu, &callSign);
-      consumeCurToken(cu->curParser, TOKEN_RIGHT_PAREN,
-                      "expect ')' after argument list!");
+      // 若后面不是')',说明有参数列表
+      if (!matchToken(cu->curParser, TOKEN_RIGHT_PAREN))
+      {
+        // 2 压入实参
+        processArgList(cu, &callSign);
+        consumeCurToken(cu->curParser, TOKEN_RIGHT_PAREN,
+                        "expect ')' after argument list!");
+      }
+      // 3 生成调用指令以调用函数
+      emitCallBySignature(cu, &callSign, OPCODE_CALL0);
     }
-    // 3 生成调用指令以调用函数
-    emitCallBySignature(cu, &callSign, OPCODE_CALL0);
   }
   else // 没有后缀将a[i]加载进栈中即可
   {
@@ -1574,20 +1578,25 @@ static void compileIdSuffix(CompileUnit *cu, bool canAssign, Variable var)
     emitCallBySignature(cu, &sign, OPCODE_CALL0); // Call a.+
     emitStoreVariable(cu, var);                   // Store a
   }
-  else if (matchToken(cu->curParser, TOKEN_LEFT_PAREN)) // 后缀为函数调用
+  else if (cu->curParser->curToken.type == TOKEN_LEFT_PAREN) // 后缀为函数调用
   {
     emitLoadVariable(cu, var);
     Signature sign = {SIGN_METHOD, "call", 4, 0};
-    // 若后面不是')',说明有参数列表
-    if (!matchToken(cu->curParser, TOKEN_RIGHT_PAREN))
+
+    while (matchToken(cu->curParser, TOKEN_LEFT_PAREN))
     {
-      // 2 压入实参
-      processArgList(cu, &sign);
-      consumeCurToken(cu->curParser, TOKEN_RIGHT_PAREN,
-                      "expect ')' after argument list!");
+      sign.argNum = 0;
+      // 若后面不是')',说明有参数列表
+      if (!matchToken(cu->curParser, TOKEN_RIGHT_PAREN))
+      {
+        // 2 压入实参
+        processArgList(cu, &sign);
+        consumeCurToken(cu->curParser, TOKEN_RIGHT_PAREN,
+                        "expect ')' after argument list!");
+      }
+      // 3 生成调用指令以调用函数
+      emitCallBySignature(cu, &sign, OPCODE_CALL0);
     }
-    // 3 生成调用指令以调用函数
-    emitCallBySignature(cu, &sign, OPCODE_CALL0);
   }
   else
   {
@@ -1831,7 +1840,9 @@ static void expression(CompileUnit *cu, BindPower rbp)
 
   // "="号会被赋值语句和声明语句消费掉，到这如果到这碰到了"="那么代表
   // 该表达式不是合法的赋值表达式比如"3 = 4"
-  if (matchToken(cu->curParser, TOKEN_ASSIGN))
+  if (matchToken(cu->curParser, TOKEN_ASSIGN) ||
+      matchToken(cu->curParser, TOKEN_ADD_ADD) ||
+      matchToken(cu->curParser, TOKEN_SUB_SUB))
     COMPILE_ERROR(cu->curParser, "can't assign to temporary");
 
   // 表达式开头的要么是操作数要么是前缀运算符,必然有nud方法
@@ -1877,7 +1888,7 @@ static void unaryOperator(CompileUnit *cu, UNUSED bool canAssign)
   emitCall(cu, 0, rule->id, 1);
 }
 
-static void defineFieldDefaultGetter(CompileUnit *cu, Variable classVar, int fieldIndex)
+static void defineInstanceFieldDefaultGetter(CompileUnit *cu, Variable classVar, int fieldIndex)
 {
   // 在sparrow中所有的字段的访问都会被转换为对字段同名getter的调用，为了在外边能够访问
   // 字段我们会给每一个字段一个默认的getter
@@ -1891,7 +1902,7 @@ static void defineFieldDefaultGetter(CompileUnit *cu, Variable classVar, int fie
   uint32_t signLen = sign2String(&getterSign, signatureString);
 
   // 将方法声明
-  uint32_t methodIndex = declareMethod(cu, signatureString, signLen);
+  uint32_t methodIndex = declareMethod(cu, signatureString, signLen, true);
 
   writeOpCodeByteOperand(&getterCU, OPCODE_LOAD_THIS_FIELD, fieldIndex); // 载入该字段到栈中
   writeOpCode(&getterCU, OPCODE_RETURN);                                 // 将上面栈顶的值返回
@@ -1903,10 +1914,41 @@ static void defineFieldDefaultGetter(CompileUnit *cu, Variable classVar, int fie
 #endif
 
   // 定义方法:将上面创建的方法闭包绑定到类
-  defineMethod(cu, classVar, cu->enclosingClassBK->inStatic, methodIndex);
+  defineMethod(cu, classVar, false, methodIndex);
 }
 
-static void defineFieldDefaultSetter(CompileUnit *cu, Variable classVar, int fieldIndex)
+static void defineStaticFieldDefaultGetter(CompileUnit *cu, Variable classVar, const char *staticFieldName, uint32_t length)
+{
+  // 在sparrow中所有的字段的访问都会被转换为对字段同名getter的调用，为了在外边能够访问
+  // 字段我们会给每一个字段一个默认的getter
+  // 生成getter的编译单元
+  Token name = cu->curParser->preToken;
+  CompileUnit getterCU;
+  initCompileUnit(cu->curParser, &getterCU, cu, false);
+
+  Signature getterSign = {SIGN_GETTER, name.start, name.length, 0}; // 临时用于编译函数
+  char signatureString[MAX_SIGN_LEN] = {'\0'};
+  uint32_t signLen = sign2String(&getterSign, signatureString);
+
+  // 将方法声明
+  uint32_t methodIndex = declareMethod(cu, signatureString, signLen, true);
+
+  // 静态字段是作为模块变量来定义的，一个静态getter中访问该字段等价于访问一个upvalue
+  int index = findUpvalue(&getterCU, staticFieldName, length);
+  writeOpCodeByteOperand(&getterCU, OPCODE_LOAD_UPVALUE, index);
+  writeOpCode(&getterCU, OPCODE_RETURN); // 将上面栈顶的值返回
+
+#if DEBUG
+  endCompileUnit(&getterCU, signatureString, signLen);
+#else
+  endCompileUnit(&getterCU);
+#endif
+
+  // 定义方法:将上面创建的方法闭包绑定到类
+  defineMethod(cu, classVar, true, methodIndex);
+}
+
+static void defineInstanceFieldDefaultSetter(CompileUnit *cu, Variable classVar, int fieldIndex)
 {
   // 在sparrow中所有的字段的赋值都会被转换为对字段同名setter的调用，为了在外边能够访问
   // 字段我们会给每一个字段一个默认的setter
@@ -1920,7 +1962,7 @@ static void defineFieldDefaultSetter(CompileUnit *cu, Variable classVar, int fie
   uint32_t signLen = sign2String(&getterSign, signatureString);
 
   // 将方法声明
-  uint32_t methodIndex = declareMethod(cu, signatureString, signLen);
+  uint32_t methodIndex = declareMethod(cu, signatureString, signLen, true);
 
   writeOpCodeByteOperand(&setterCU, OPCODE_LOAD_LOCAL_VAR, 1); // 加载第一个参数到栈中
   writeOpCodeByteOperand(&setterCU, OPCODE_STORE_THIS_FIELD,
@@ -1934,7 +1976,40 @@ static void defineFieldDefaultSetter(CompileUnit *cu, Variable classVar, int fie
 #endif
 
   // 定义方法:将上面创建的方法闭包绑定到类
-  defineMethod(cu, classVar, cu->enclosingClassBK->inStatic, methodIndex);
+  defineMethod(cu, classVar, false, methodIndex);
+}
+
+static void defineStaticFieldDefaultSetter(CompileUnit *cu, Variable classVar, const char *staticFieldName, uint32_t length)
+{
+  // 在sparrow中所有的字段的赋值都会被转换为对字段同名setter的调用，为了在外边能够访问
+  // 字段我们会给每一个字段一个默认的setter
+  // 生成setter的编译单元
+  Token name = cu->curParser->preToken;
+  CompileUnit setterCU;
+  initCompileUnit(cu->curParser, &setterCU, cu, false);
+
+  Signature getterSign = {SIGN_SETTER, name.start, name.length, 1}; // 临时用于编译函数
+  char signatureString[MAX_SIGN_LEN] = {'\0'};
+  uint32_t signLen = sign2String(&getterSign, signatureString);
+
+  // 将方法声明
+  uint32_t methodIndex = declareMethod(cu, signatureString, signLen, true);
+
+  writeOpCodeByteOperand(&setterCU, OPCODE_LOAD_LOCAL_VAR, 1); // 加载第一个参数到栈中
+
+  // 静态字段是作为模块变量来定义的，一个静态setter中访问该字段等价于访问一个upvalue
+  int index = findUpvalue(&setterCU, staticFieldName, length);
+  writeOpCodeByteOperand(&setterCU, OPCODE_STORE_UPVALUE, index); // 将参数赋值到字段中
+  writeOpCode(&setterCU, OPCODE_RETURN);                          // 将字段的最新值返回
+
+#if DEBUG
+  endCompileUnit(&setterCU, signatureString, signLen);
+#else
+  endCompileUnit(&setterCU);
+#endif
+
+  // 定义方法:将上面创建的方法闭包绑定到类
+  defineMethod(cu, classVar, true, methodIndex);
 }
 
 // 编译变量定义
@@ -1975,6 +2050,10 @@ static void compileVarDefinition(CompileUnit *cu, Variable classVar, bool isStat
 
         // 静态域可初始化
         Variable var = findVariable(cu, staticFieldId, staticFieldIdLen);
+
+        defineStaticFieldDefaultGetter(cu, classVar, staticFieldId, staticFieldIdLen);
+        defineStaticFieldDefaultSetter(cu, classVar, staticFieldId, staticFieldIdLen);
+
         if (matchToken(cu->curParser, TOKEN_ASSIGN))
         {
           expression(cu, BP_LOWEST);
@@ -1998,8 +2077,8 @@ static void compileVarDefinition(CompileUnit *cu, Variable classVar, bool isStat
         fieldIndex = addSymbol(cu->curParser->vm,
                                &classBK->fields, name.start, name.length);
 
-        defineFieldDefaultGetter(cu, classVar, fieldIndex);
-        defineFieldDefaultSetter(cu, classVar, fieldIndex);
+        defineInstanceFieldDefaultGetter(cu, classVar, fieldIndex);
+        defineInstanceFieldDefaultSetter(cu, classVar, fieldIndex);
       }
       else
       {
@@ -2627,8 +2706,13 @@ static void compileStatement(CompileUnit *cu)
 }
 
 // 声明方法
-static int declareMethod(CompileUnit *cu, char *signStr, uint32_t length)
+static int declareMethod(CompileUnit *cu, char *signStr, uint32_t length, bool isDefault)
 {
+// 用int的最高位用来存储isDefault
+#define IS_DEFAULT(methodIndex) ((uint32_t)methodIndex >> 31)
+#define SET_DEFAULT(index, isDefault) (((isDefault ? 1 : 0) << 31) | index)
+#define INDEX(methodIndex) (methodIndex & 0x7fffffff)
+
   // 确保方法被录入到vm->allMethodNames
   int index = ensureSymbolExist(cu->curParser->vm,
                                 &cu->curParser->vm->allMethodNames, signStr, length);
@@ -2637,20 +2721,24 @@ static int declareMethod(CompileUnit *cu, char *signStr, uint32_t length)
   IntBuffer *methods = cu->enclosingClassBK->inStatic ? &cu->enclosingClassBK->staticMethods
                                                       : &cu->enclosingClassBK->instantMethods;
 
-  // uint32_t idx = 0;
-  // while (idx < methods->count)
-  // {
-  //   if (methods->datas[idx] == index)
-  //   {
-  //     COMPILE_ERROR(cu->curParser, "repeat define method %s in class %s!",
-  //                   signStr, cu->enclosingClassBK->name->value.start);
-  //   }
-  //   idx++;
-  // }
+  uint32_t idx = 0;
+  while (idx < methods->count)
+  {
+    int methodIndex = methods->datas[idx];
+    if (INDEX(methodIndex) == index && !IS_DEFAULT(methodIndex))
+    {
+      COMPILE_ERROR(cu->curParser, "repeat define method %s in class %s!",
+                    signStr, cu->enclosingClassBK->name->value.start);
+    }
+    idx++;
+  }
 
   // 若是新定义就加入,这里并不是注册新方法,
   // 而是用索引来记录已经定义过的方法,用于以后排重
-  IntBufferAdd(cu->curParser->vm, methods, index);
+  IntBufferAdd(cu->curParser->vm, methods, SET_DEFAULT(index, isDefault));
+#undef IS_DEFAULT
+#undef SET_DEFAULT
+#undef INDEX
   return index;
 }
 
@@ -2731,7 +2819,7 @@ static void compileMethod(CompileUnit *cu, Variable classVar, bool isStatic)
   uint32_t signLen = sign2String(&sign, signatureString);
 
   // 将方法声明
-  uint32_t methodIndex = declareMethod(cu, signatureString, signLen);
+  uint32_t methodIndex = declareMethod(cu, signatureString, signLen, false);
 
   // 编译方法体指令流到方法自己的编译单元methodCU
   compileBody(&methodCU, sign.type == SIGN_CONSTRUCT);

@@ -1,4 +1,4 @@
-import test_utils for assert_equal
+import test_utils for assert_equal, assert_deep_equal
 
 var a = 1
 
@@ -27,3 +27,13 @@ fun test_local_variable_suffix() {
 }
 
 test_local_variable_suffix()
+
+
+var i = 0
+var list = []
+a = Fn.new{
+    list.add(i++)
+    return a
+}
+a()()()
+assert_deep_equal([0, 1, 2], list, "assert failed!")
