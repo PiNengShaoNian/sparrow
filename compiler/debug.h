@@ -4,6 +4,7 @@
 #include "utils.h"
 #include "obj_fn.h"
 #include "obj_thread.h"
+#include "parser.h"
 
 void bindDebugFnName(VM *vm, FnDebug *fnDebug,
                      const char *name, uint32_t length);

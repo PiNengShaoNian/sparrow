@@ -6,6 +6,7 @@
 
 typedef struct
 {
+  const char *file;       // 文件名
   char *fnName;     // 函数名
   IntBuffer lineNo; // 行号
 } FnDebug;          // 在函数中的调试结构

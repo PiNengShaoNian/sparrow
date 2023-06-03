@@ -3036,7 +3036,7 @@ static void compileImport(CompileUnit *cu)
   // 比如import sparrow.sp, 这时候就要跳过扩展名
   if (cu->curParser->preToken.start[cu->curParser->preToken.length] == '.')
   {
-    printf("\nwarning!!! the imported module needn`t extension!, compiler try to ignor it!\n");
+    printf("\nwarning!!! the imported module needn`t extension!, compiler try to ignore it!\n");
 
     // 跳过扩展名
     getNextToken(cu->curParser); // 跳过'.'
@@ -3110,7 +3110,7 @@ static void compileProgram(CompileUnit *cu)
     compileStatement(cu);
 }
 
-// 编译模块(目前是桩函数)
+// 编译模块
 ObjFn *compileModule(VM *vm, ObjModule *objModule,
                      const char *moduleCode)
 {
@@ -3165,14 +3165,16 @@ ObjFn *compileModule(VM *vm, ObjModule *objModule,
     idx++;
   }
 
+  ObjFn *objFn;
+#if DEBUG
+  objFn = endCompileUnit(&moduleCU, "(script)", 8);
+#else
+  objFn = endCompileUnit(&moduleCU);
+#endif
   // 模块编译完成,当前编译单元置空
   vm->curParser->curCompileUnit = NULL;
   vm->curParser = vm->curParser->parent;
-#if DEBUG
-  return endCompileUnit(&moduleCU, "(script)", 8);
-#else
-  return endCompileUnit(&moduleCU);
-#endif
+  return objFn;
 }
 
 // 标识compileUnit使用的所有堆分配的对象(及其所有父对象)可达,以使它们不被GC收集

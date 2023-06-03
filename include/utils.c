@@ -85,7 +85,7 @@ void errorReport(void *parser, void *curThread, ErrorType errorType,
         fprintf(stderr, "%s:%d \"%s\"\n", ((Parser *)parser)->file, ((Parser *)parser)->preToken.lineNo, buffer);
         break;
     case ERROR_RUNTIME:
-        fprintf(stderr, "%s\n", buffer);
+        fprintf(stderr, "Error: %s\n", buffer);
 #ifdef DEBUG
         dumpCallStack(curThread);
 #endif

@@ -565,9 +565,9 @@ VMResult executeInstruction(VM *vm, register ObjThread *curThread)
                         {
                             ObjString *err = VALUE_TO_OBJSTR(curThread->errorObj);
 #ifndef DEBUG
-                            printf("%s\n", err->value.start);
+                            printf("Error: %s\n", err->value.start);
 #else
-                            printf("%s\n", err->value.start);
+                            printf("Error: %s\n", err->value.start);
                             dumpCallStack(curThread);
 #endif
                         }

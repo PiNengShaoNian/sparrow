@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include "debug.h"
 #include "vm.h"
+#include "core.h"
 #include <string.h>
 
 // 在fnDebug中绑定函数名
@@ -13,6 +14,8 @@ void bindDebugFnName(VM *vm, FnDebug *fnDebug,
   fnDebug->fnName = ALLOCATE_ARRAY(vm, char, length + 1);
   memcpy(fnDebug->fnName, name, length);
   fnDebug->fnName[length] = '\0';
+  ASSERT(fnDebug->file == NULL, "debug.file has bound!");
+  fnDebug->file = vm->curParser ? vm->curParser->file : NULL;
 }
 
 // 打印栈
@@ -397,20 +400,91 @@ void dumpInstructions(VM *vm, ObjFn *fn)
   printf("\n");
 }
 
+static int startsWith(const char *str, const char *pattern)
+{
+  size_t strLength = strlen(str);
+  size_t patternLength = strlen(pattern);
+
+  // 如果模式长度大于字符串长度，返回0
+  if (patternLength > strLength)
+    return 0;
+
+  // 使用strncmp函数比较前patternLength个字符
+  if (strncmp(str, pattern, patternLength) == 0)
+    return 1; // 匹配成功，返回1
+
+  return 0; // 匹配失败，返回0
+}
+
+static int endsWith(const char *str, const char *pattern)
+{
+  size_t strLength = strlen(str);
+  size_t patternLength = strlen(pattern);
+
+  // 如果模式长度大于字符串长度，返回0
+  if (patternLength > strLength)
+    return 0;
+
+  // 比较字符串后patternLength个字符
+  if (strncmp(str + strLength - patternLength, pattern, patternLength) == 0)
+    return 1; // 匹配成功，返回1
+
+  return 0; // 匹配失败，返回0
+}
+
 void dumpCallStack(ObjThread *curThread)
 {
 #define INSTR_LINENO \
   (curFrame->closure->fn->debug->lineNo.datas[ip - curFrame->closure->fn->instrStream.datas - 1])
 #define INSTR_FN_NAME \
   (curFrame->closure->fn->debug->fnName)
+#define INSTR_FILE_NAME \
+  (curFrame->closure->fn->debug->file)
+
+  char buf[512];
+
   for (int i = curThread->usedFrameNum - 1; i >= 0; i--)
   {
     Frame *curFrame = &curThread->frames[i];
     uint8_t *ip = curFrame->ip;
+    const char *fnName = INSTR_FN_NAME;
+    const char *file = INSTR_FILE_NAME;
+    int rootDirLen = rootDir ? strlen(rootDir) : 0;
+    int fileLen = strlen(file);
+    int bufLen = 0;
+
+    if (fnName && fnName[0] == '(') // 在顶层执行的，没有具体的函数名
+      fnName = "";
+
+    if (!rootDir || (rootDir && startsWith(file, rootDir))) // 已经包含前缀了,或者没有根目录直接跳过
+    {
+      memmove(buf, file, fileLen);
+      buf[fileLen] = '\0';
+      bufLen = fileLen;
+    }
+    else
+    {
+      memmove(buf, rootDir, rootDirLen);
+      memmove(buf + rootDirLen, file, fileLen);
+      buf[rootDirLen + fileLen] = '\0';
+      bufLen = rootDirLen + fileLen;
+    }
+
+    if (!endsWith(buf, ".sp"))
+    {
+      memmove(buf + bufLen, ".sp", 3);
+      buf[bufLen + 3] = '\0';
+    }
+
+    buf[511] = '\0';
 
     // ip表示当前执行中指令的下一条指令的起始地址，在这个基础上减去1就是当前指令的末尾
     // 去除该处byte所对应的行号即可
-    printf("(%s) line: %d\n", INSTR_FN_NAME, INSTR_LINENO);
+
+    if (strlen(fnName) == 0)
+      printf("    at %s:%d\n", buf, INSTR_LINENO);
+    else
+      printf("    at %s (%s:%d)\n", fnName, buf, INSTR_LINENO);
   }
   fflush(stdout);
 }

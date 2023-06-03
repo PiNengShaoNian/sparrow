@@ -47,6 +47,11 @@ char *rootDir = NULL; // 根目录
   {                                                                \
     vmPtr->curThread->errorObj =                                   \
         OBJ_TO_VALUE(newObjString(vmPtr, errMsg, strlen(errMsg))); \
+    ObjThread *curThread = vmPtr->curThread->caller;               \
+    if (curThread)                                                 \
+      curThread->esp[-1] = vmPtr->curThread->errorObj;             \
+    vmPtr->curThread->caller = NULL;                               \
+    vmPtr->curThread = curThread;                                  \
     return false;                                                  \
   } while (0);
 
@@ -143,7 +148,7 @@ static ObjThread *loadModule(VM *vm, Value moduleName, const char *moduleCode)
   return moduleThread;
 }
 
-// 执行模块,目前为空,桩函数
+// 执行模块
 VMResult executeModule(VM *vm, Value moduleName, const char *moduleCode)
 {
   ObjThread *objThread = loadModule(vm, moduleName, moduleCode);
@@ -631,7 +636,16 @@ static bool primThreadAbort(VM *vm, Value *args)
   // 此函数后续未处理,暂时放着
   vm->curThread->errorObj = args[1]; // 保存退出参数
   if (!VALUE_IS_NULL(args[1]))
-    vm->curThread = NULL;
+  {
+    ObjThread *curThread = vm->curThread->caller;
+    vm->curThread->caller = NULL;
+    vm->curThread = curThread;
+    if (curThread)
+    {
+      // 将错误作为结果返回给主调用
+      curThread->esp[-1] = args[1];
+    }
+  }
 
   return VALUE_IS_NULL(args[1]);
 }

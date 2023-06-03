@@ -19,6 +19,7 @@ ObjFn *newObjFn(VM *vm, ObjModule *objModule, uint32_t slotNum)
 #ifdef DEBUG
   objFn->debug = ALLOCATE(vm, FnDebug);
   objFn->debug->fnName = NULL;
+  objFn->debug->file = NULL;
   IntBufferInit(&objFn->debug->lineNo);
 #endif
   return objFn;
